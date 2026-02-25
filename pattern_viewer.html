@@ -133,7 +133,7 @@
     .track-row {
       display: flex;
       align-items: center;
-      margin-bottom: 3px;
+      margin-bottom: 10px;
     }
     .track-label {
       flex: 0 0 66px;
@@ -204,6 +204,36 @@
     .trig-dot.swing  { bottom: 2px; left:  2px; background: #4499ff; }
     .trig-dot.slide  { bottom: 2px; right: 2px; background: #44cc77; }
 
+    /* Lock trig: parameter lock present, but no sound trigger */
+    .step.lock-trig {
+      background: #0e1f2a;
+      border-color: #2a6080;
+      box-shadow: 0 0 3px rgba(42, 96, 128, 0.35);
+    }
+    /* Plock triangle indicator — top-left corner of triggered step boxes */
+    .step.has-plock::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: 0; height: 0;
+      border-style: solid;
+      border-width: 7px 7px 0 0;
+      border-color: #cc44aa transparent transparent transparent;
+    }
+    /* Outer wrapper for steps — provides positioning context for slide lines */
+    .steps-outer {
+      position: relative;
+    }
+    /* Slide connector line drawn below the step boxes */
+    .slide-line {
+      position: absolute;
+      top: 34px;
+      height: 2px;
+      background: #44cc77;
+      border-radius: 1px;
+      pointer-events: none;
+    }
+
     /* Page toggle */
     .page-ctrl {
       display: flex;
@@ -262,11 +292,14 @@
     Trig colours:
       <span style="color:#e05a00">&#9632;</span>&thinsp;normal &ensp;
       <span style="color:#ffbb44">&#9632;</span>&thinsp;accent &ensp;
-      <span style="color:#606060">&#9632;</span>&thinsp;mute &mdash;
+      <span style="color:#606060">&#9632;</span>&thinsp;mute &ensp;
+      <span style="color:#2a6080">&#9632;</span>&thinsp;lock trig (plock, no sound) &mdash;
+    <span style="color:#cc44aa">&#9699;</span>&thinsp;plock on trig (triangle = parameter lock active) &mdash;
     Dots:
       <span style="color:#ddcc22">&#9679;</span>&thinsp;retrig &ensp;
       <span style="color:#4499ff">&#9679;</span>&thinsp;swing (hidden when pattern swing = 50%) &ensp;
       <span style="color:#44cc77">&#9679;</span>&thinsp;slide.<br>
+    Slide: <span style="color:#44cc77">&#9644;</span>&thinsp;green line below row, from slide step to next trig&thinsp;/&thinsp;lock (same page only).<br>
     FW 1.70 binary format (compatible with 1.72).
   </div>
 
@@ -284,6 +317,9 @@
     const AR_TRIG_ACCENT             = 0x0008;  // bit 3
     const AR_TRIG_SWING              = 0x0010;  // bit 4
     const AR_TRIG_SLIDE              = 0x0020;  // bit 5
+    // Bits 6-13: one bit per plock slot — set when that slot has a value for this step.
+    // (Inferred from libanalogrytm: 14-bit trig field, bits 0-5 are the standard flags above.)
+    const AR_TRIG_PLOCK_MASK         = 0x3FC0;  // bits 6-13
     const AR_NUM_TRACKS              = 13;
     const AR_NUM_STEPS               = 64;
     const TRACK_V5_SZ                = 0x0281;  // 641 bytes / track (FW1.70)
@@ -593,13 +629,24 @@
     function renderGrid(raw, page) {
       gridEl.innerHTML = '';
 
-      const GROUPS     = 2;
-      const GROUP_SZ   = 16;
+      const GROUPS    = 2;
+      const GROUP_SZ  = 16;
+      const STEP_W    = 32;   // matches --step-size
+      const STEP_GAP  = 2;    // matches --step-gap
+      const GROUP_GAP = 8;    // matches --group-gap
       const stepOffset = page * 32;
 
       // Swing amount: 0 = 50% (no swing), 1–30 = 51–80%.
-      // Only show swing dots when swing is actually active.
       const swingAmount = (raw.length > SWING_AMOUNT_OFFSET) ? raw[SWING_AMOUNT_OFFSET] : 0;
+
+      // ── X-centre of step pageIdx (0-31) inside the track-steps container ──
+      // groupWidth = 16*32 + 15*2 = 542 px
+      function stepCenterX(pageIdx) {
+        const g = Math.floor(pageIdx / GROUP_SZ);
+        const s = pageIdx % GROUP_SZ;
+        const groupWidth = GROUP_SZ * STEP_W + (GROUP_SZ - 1) * STEP_GAP;
+        return g * (groupWidth + GROUP_GAP) + s * (STEP_W + STEP_GAP) + STEP_W / 2;
+      }
 
       // ── Ruler (step numbers) ──────────────────────────────────────────────
       const ruler = document.createElement('div');
@@ -631,13 +678,13 @@
         const trackBase  = 4 + t * TRACK_V5_SZ;
         const trigBits   = raw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
         const numSteps   = raw[trackBase + NUM_STEPS_OFFSET];
+        const speedByte  = raw[trackBase + TRACK_SPEED_OFFSET];
+        const speedStr   = TRACK_SPEED_LABELS[speedByte & 0x07] || '1x';
 
         const row = document.createElement('div');
         row.className = 'track-row';
 
-        const speedByte = raw[trackBase + TRACK_SPEED_OFFSET];
-        const speedStr  = TRACK_SPEED_LABELS[speedByte & 0x07] || '1x';
-
+        // ── Label ──
         const label = document.createElement('div');
         label.className = 'track-label';
         const nameSpan = document.createElement('span');
@@ -649,30 +696,54 @@
         label.appendChild(metaSpan);
         row.appendChild(label);
 
+        // ── Steps outer (provides positioning context for slide lines) ──
+        const stepsOuter = document.createElement('div');
+        stepsOuter.className = 'steps-outer';
+
         const stepsWrap = document.createElement('div');
         stepsWrap.className = 'track-steps';
+
+        // Per-page arrays to collect info for slide line rendering
+        const slideSteps  = new Array(32).fill(false); // step has SLIDE trig
+        const activeSteps = new Array(32).fill(false); // step is a trig or lock-trig
 
         for (let g = 0; g < GROUPS; g++) {
           const grp = document.createElement('div');
           grp.className = 'step-group';
 
           for (let s = 0; s < GROUP_SZ; s++) {
-            const stepIdx  = stepOffset + g * GROUP_SZ + s;
+            const pageIdx  = g * GROUP_SZ + s;
+            const stepIdx  = stepOffset + pageIdx;
             const flags    = getTrigFlags(trigBits, stepIdx);
-            const isOn     = (flags & AR_TRIG_ENABLE) !== 0;
-            const isAccent = (flags & AR_TRIG_ACCENT) !== 0;
-            const isMute   = (flags & AR_TRIG_MUTE)   !== 0;
-            const isRetrig = (flags & AR_TRIG_RETRIG) !== 0;
-            const hasSwing = (flags & AR_TRIG_SWING)  !== 0;
-            const isSlide  = (flags & AR_TRIG_SLIDE)  !== 0;
+            const isOn     = (flags & AR_TRIG_ENABLE)    !== 0;
+            const isAccent = (flags & AR_TRIG_ACCENT)    !== 0;
+            const isMute   = (flags & AR_TRIG_MUTE)      !== 0;
+            const isRetrig = (flags & AR_TRIG_RETRIG)    !== 0;
+            const hasSwing = (flags & AR_TRIG_SWING)     !== 0;
+            const isSlide  = (flags & AR_TRIG_SLIDE)     !== 0;
+            const hasPlock = (flags & AR_TRIG_PLOCK_MASK) !== 0;
             const beyond   = stepIdx >= numSteps;
+
+            // Collect info for slide lines (only within active track length)
+            if (!beyond) {
+              if (isOn || hasPlock)  activeSteps[pageIdx] = true;
+              if (isOn && isSlide)   slideSteps[pageIdx]  = true;
+            }
 
             const cell = document.createElement('div');
             let cls = 'step';
-            if (isOn)                        cls += ' on';
-            if (isOn && isAccent && !isMute) cls += ' accent';
-            if (isOn && isMute)              cls += ' mute';
-            if (beyond)                      cls += ' inactive';
+
+            if (isOn) {
+              cls += ' on';
+              if (isAccent && !isMute)     cls += ' accent';
+              if (isMute)                  cls += ' mute';
+              if (!beyond && hasPlock)     cls += ' has-plock';
+            } else if (!beyond && hasPlock) {
+              // Lock trig: plock without a sound trigger
+              cls += ' lock-trig';
+            }
+
+            if (beyond) cls += ' inactive';
             cell.className = cls;
 
             // Modifier dots (only on triggered steps)
@@ -684,21 +755,45 @@
 
             // Tooltip
             const modParts = [];
+            if (hasPlock) modParts.push('PLOCK');
             if (isAccent) modParts.push('ACCENT');
             if (isMute)   modParts.push('MUTE');
             if (isRetrig) modParts.push('RETRIG');
             if (hasSwing && swingAmount !== 0) modParts.push('SWING');
             if (isSlide)  modParts.push('SLIDE');
             cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
-              + (isOn    ? ' · TRIG' + (modParts.length ? ' [' + modParts.join(', ') + ']' : '') : '')
-              + (beyond  ? ' · beyond' : '');
+              + (isOn                       ? ' · TRIG' : '')
+              + (!isOn && hasPlock && !beyond ? ' · LOCK' : '')
+              + (modParts.length ? ' [' + modParts.join(', ') + ']' : '')
+              + (beyond ? ' · beyond' : '');
 
             grp.appendChild(cell);
           }
           stepsWrap.appendChild(grp);
         }
 
-        row.appendChild(stepsWrap);
+        stepsOuter.appendChild(stepsWrap);
+
+        // ── Slide lines ───────────────────────────────────────────────────
+        // For each step that has a SLIDE trig, draw a horizontal line from
+        // its centre to the centre of the next trig or lock-trig on the page.
+        for (let i = 0; i < 32; i++) {
+          if (!slideSteps[i]) continue;
+          for (let j = i + 1; j < 32; j++) {
+            if (activeSteps[j]) {
+              const x1 = stepCenterX(i);
+              const x2 = stepCenterX(j);
+              const line = document.createElement('div');
+              line.className = 'slide-line';
+              line.style.left  = x1 + 'px';
+              line.style.width = (x2 - x1) + 'px';
+              stepsOuter.appendChild(line);
+              break;
+            }
+          }
+        }
+
+        row.appendChild(stepsOuter);
         gridEl.appendChild(row);
       }
     }
