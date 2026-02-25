@@ -111,7 +111,7 @@
       margin-bottom: 4px;
     }
     .track-label-space {
-      flex: 0 0 42px;
+      flex: 0 0 66px;
     }
     .ruler-groups {
       display: flex;
@@ -136,12 +136,21 @@
       margin-bottom: 3px;
     }
     .track-label {
-      flex: 0 0 42px;
-      text-align: right;
+      flex: 0 0 66px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      justify-content: center;
       padding-right: 10px;
+      gap: 2px;
       font-size: 0.75em;
       color: var(--muted);
       letter-spacing: 1px;
+    }
+    .track-meta {
+      font-size: 0.82em;
+      color: #444;
+      letter-spacing: 0;
     }
     .track-steps {
       display: flex;
@@ -280,7 +289,15 @@
     const TRACK_V5_SZ                = 0x0281;  // 641 bytes / track (FW1.70)
     const TRIG_BITS_OFFSET           = 0;       // trig_bits[112] at track offset 0
     const NUM_STEPS_OFFSET           = 0x0235;  // num_steps at track offset 0x235
+    const TRACK_SPEED_OFFSET         = 0x027B;  // flags_and_speed; bits 2–0 = speed
+    const MASTER_LENGTH_OFFSET       = 0x3321;  // master_length (s_u16_t, little-endian)
+    const KIT_NUMBER_OFFSET          = 0x3325;  // kit_number (0–127, 0xFF=unsaved)
     const SWING_AMOUNT_OFFSET        = 0x3326;  // swing_amount (0=50%, 1–30=51–80%)
+    const BPM_MSB_OFFSET             = 0x332A;  // BPM high byte (value/10 = BPM)
+    const BPM_LSB_OFFSET             = 0x332B;  // BPM low byte
+
+    // Track speed: bits 2–0 of flags_and_speed
+    const TRACK_SPEED_LABELS = ['2x', '3/2x', '1x', '3/4x', '1/2x', '1/4x', '1/8x'];
 
     // Workbuffer pattern request:
     //   F0 00 20 3C 07 <devId=0> <reqId=0x6A> <verHi=01> <verLo=01>
@@ -463,10 +480,22 @@
         return;
       }
 
+      const kitNum     = raw.length > KIT_NUMBER_OFFSET     ? raw[KIT_NUMBER_OFFSET]    : 0xFF;
+      const kitStr     = (kitNum === 0xFF) ? '—' : String(kitNum + 1).padStart(2, '0');
+      const bpmRaw     = raw.length > BPM_LSB_OFFSET
+        ? (raw[BPM_MSB_OFFSET] << 8) | raw[BPM_LSB_OFFSET] : 0;
+      const bpmStr     = bpmRaw ? (bpmRaw / 10).toFixed(1) : '—';
+      const swingAmt   = raw.length > SWING_AMOUNT_OFFSET  ? raw[SWING_AMOUNT_OFFSET]  : 0;
+      const masterLen  = raw.length > MASTER_LENGTH_OFFSET + 1
+        ? raw[MASTER_LENGTH_OFFSET] | (raw[MASTER_LENGTH_OFFSET + 1] << 8) : 0;
+      const masterStr  = (masterLen === 0 || masterLen > 128) ? 'INF' : masterLen;
+
       metaEl.innerHTML =
-        'Pattern: <span>' + patName + '</span>  ' +
-        'Raw: <span>' + raw.length + ' bytes</span>  ' +
-        'Ver: <span>' + syx[7] + '.' + syx[8] + '</span>';
+        'Pattern: <span>' + patName + '</span> &ensp;' +
+        'Kit: <span>'     + kitStr  + '</span> &ensp;' +
+        'BPM: <span>'     + bpmStr  + '</span> &ensp;' +
+        'Swing: <span>'   + (50 + swingAmt) + '%</span> &ensp;' +
+        'Master: <span>'  + masterStr + '</span>';
 
       lastRaw = raw;
       renderGrid(raw, stepPage);
@@ -606,9 +635,18 @@
         const row = document.createElement('div');
         row.className = 'track-row';
 
+        const speedByte = raw[trackBase + TRACK_SPEED_OFFSET];
+        const speedStr  = TRACK_SPEED_LABELS[speedByte & 0x07] || '1x';
+
         const label = document.createElement('div');
         label.className = 'track-label';
-        label.textContent = TRACK_NAMES[t];
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = TRACK_NAMES[t];
+        const metaSpan = document.createElement('span');
+        metaSpan.className = 'track-meta';
+        metaSpan.textContent = speedStr + '\u00B7' + numSteps;
+        label.appendChild(nameSpan);
+        label.appendChild(metaSpan);
         row.appendChild(label);
 
         const stepsWrap = document.createElement('div');
