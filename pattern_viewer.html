@@ -202,7 +202,6 @@
     }
     .trig-dot.retrig { top:    2px; right: 2px; background: #ddcc22; }
     .trig-dot.swing  { bottom: 2px; left:  2px; background: #4499ff; }
-    .trig-dot.slide  { bottom: 2px; right: 2px; background: #44cc77; }
 
     /* Lock trig: parameter lock present, but no sound trigger */
     .step.lock-trig {
@@ -297,8 +296,7 @@
     <span style="color:#cc44aa">&#9699;</span>&thinsp;plock on trig (triangle = parameter lock active) &mdash;
     Dots:
       <span style="color:#ddcc22">&#9679;</span>&thinsp;retrig &ensp;
-      <span style="color:#4499ff">&#9679;</span>&thinsp;swing (hidden when pattern swing = 50%) &ensp;
-      <span style="color:#44cc77">&#9679;</span>&thinsp;slide.<br>
+      <span style="color:#4499ff">&#9679;</span>&thinsp;swing (hidden when pattern swing = 50%).<br>
     Slide: <span style="color:#44cc77">&#9644;</span>&thinsp;green line below row, from slide step to next trig&thinsp;/&thinsp;lock (same page only).<br>
     FW 1.70 binary format (compatible with 1.72).
   </div>
@@ -763,23 +761,38 @@
             // Plock detection via plock_seqs (not trig flags — see note above).
             const hasPlock = !beyond && plockMap[t][stepIdx] !== 0;
 
+            // Lock trig detection.
+            // On the AR, lock trigs are stored with AR_TRIG_ENABLE=1 (isOn=true), but
+            // the _SW state bits (0x0780) are NOT set — those are only set by
+            // default_trig_flags on regular triggered steps. The _EN bits (0x3840) ARE
+            // set when any parameter is locked. So the distinguishing signature is:
+            //   regular trig : isOn=true,  swBits ≠ 0 (always, even without user plocks)
+            //   lock trig    : isOn=true,  swBits = 0, enBits ≠ 0
+            // We also handle the edge case where TRIG_ENABLE=0 with plock data.
+            const enBits     = flags & 0x3840; // LFO+SYN+SMP+ENV PL_EN
+            const swBits     = flags & 0x0780; // SYN+SMP+ENV+LFO PL_SW
+            const isLockTrig = !beyond && (
+              (!isOn && hasPlock) ||
+              (isOn && swBits === 0 && enBits !== 0)
+            );
+
             // Collect info for slide lines (only within active track length)
             if (!beyond) {
-              if (isOn || hasPlock)  activeSteps[pageIdx] = true;
-              if (isOn && isSlide)   slideSteps[pageIdx]  = true;
+              if (isOn || isLockTrig) activeSteps[pageIdx] = true;
+              if (isOn && isSlide)    slideSteps[pageIdx]  = true;
             }
 
             const cell = document.createElement('div');
             let cls = 'step';
 
-            if (isOn) {
+            if (isLockTrig) {
+              // Lock trig: plock without sound — shown yellow on AR hardware
+              cls += ' lock-trig';
+            } else if (isOn) {
               cls += ' on';
               if (isAccent && !isMute) cls += ' accent';
               if (isMute)              cls += ' mute';
               if (hasPlock)            cls += ' has-plock';
-            } else if (hasPlock) {
-              // Lock trig: parameter lock on a non-triggered step (yellow on hardware)
-              cls += ' lock-trig';
             }
 
             if (beyond) cls += ' inactive';
@@ -789,7 +802,6 @@
             if (isOn) {
               if (isRetrig) { const d = document.createElement('div'); d.className = 'trig-dot retrig'; cell.appendChild(d); }
               if (hasSwing && swingAmount !== 0) { const d = document.createElement('div'); d.className = 'trig-dot swing'; cell.appendChild(d); }
-              if (isSlide)  { const d = document.createElement('div'); d.className = 'trig-dot slide';  cell.appendChild(d); }
             }
 
             // Tooltip
@@ -801,10 +813,9 @@
             if (hasSwing && swingAmount !== 0) modParts.push('SWING');
             if (isSlide)  modParts.push('SLIDE');
             cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
-              + (isOn              ? ' · TRIG' : '')
-              + (!isOn && hasPlock ? ' · LOCK' : '')
-              + (modParts.length   ? ' [' + modParts.join(', ') + ']' : '')
-              + (beyond            ? ' · beyond' : '');
+              + (isLockTrig      ? ' · LOCK' : isOn ? ' · TRIG' : '')
+              + (modParts.length ? ' [' + modParts.join(', ') + ']' : '')
+              + (beyond          ? ' · beyond' : '');
 
             grp.appendChild(cell);
           }
