@@ -160,16 +160,40 @@
       border: 1px solid #2a2a2a;
       cursor: default;
       flex-shrink: 0;
+      position: relative;
     }
     .step.on {
       background: var(--trig-on);
       border-color: #ff7722;
       box-shadow: 0 0 5px rgba(224, 90, 0, 0.4);
     }
+    /* Accented trig: bright amber */
+    .step.on.accent {
+      background: #ffbb44;
+      border-color: #ffdd77;
+      box-shadow: 0 0 6px rgba(255, 187, 68, 0.5);
+    }
+    /* Muted trig: grey — programmed but won't fire */
+    .step.on.mute {
+      background: #404040;
+      border-color: #606060;
+      box-shadow: none;
+    }
     /* Steps beyond track length are dimmed */
     .step.inactive {
       opacity: 0.2;
     }
+    /* Trig modifier dots */
+    .trig-dot {
+      position: absolute;
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .trig-dot.retrig { top:    1px; right: 1px; background: #ddcc22; }
+    .trig-dot.swing  { bottom: 1px; left:  1px; background: #4499ff; }
+    .trig-dot.slide  { bottom: 1px; right: 1px; background: #44cc77; }
 
     /* Group separator lines */
     .group-sep {
@@ -208,9 +232,16 @@
   </div>
 
   <div class="note">
-    Connects to the first MIDI port whose name contains "rytm" (case-insensitive).<br>
-    Requests the current workbuffer pattern via SysEx. Bright cells = active trigs.<br>
-    Dimmed cells = beyond the track&rsquo;s configured step count.<br>
+    Connects to the first MIDI port whose name contains &ldquo;rytm&rdquo; (case-insensitive).<br>
+    Requests the current workbuffer pattern via SysEx. Dimmed cells = beyond track step count.<br>
+    Trig colours:
+      <span style="color:#e05a00">&#9632;</span>&thinsp;normal &ensp;
+      <span style="color:#ffbb44">&#9632;</span>&thinsp;accent &ensp;
+      <span style="color:#606060">&#9632;</span>&thinsp;mute &mdash;
+    Dots:
+      <span style="color:#ddcc22">&#9679;</span>&thinsp;retrig &ensp;
+      <span style="color:#4499ff">&#9679;</span>&thinsp;swing &ensp;
+      <span style="color:#44cc77">&#9679;</span>&thinsp;slide.<br>
     FW 1.70 binary format (compatible with 1.72).
   </div>
 
@@ -223,6 +254,11 @@
     const AR_SYSEX_DUMP_ID_PATTERN   = 0x54;   // saved pattern dump
     const AR_SYSEX_DUMPX_ID_PATTERN  = 0x5A;   // workbuffer pattern dump
     const AR_TRIG_ENABLE             = 0x0001;  // bit 0 of 14-bit trig flags
+    const AR_TRIG_RETRIG             = 0x0002;  // bit 1
+    const AR_TRIG_MUTE               = 0x0004;  // bit 2
+    const AR_TRIG_ACCENT             = 0x0008;  // bit 3
+    const AR_TRIG_SWING              = 0x0010;  // bit 4
+    const AR_TRIG_SLIDE              = 0x0020;  // bit 5
     const AR_NUM_TRACKS              = 13;
     const AR_NUM_STEPS               = 64;
     const TRACK_V5_SZ                = 0x0281;  // 641 bytes / track (FW1.70)
@@ -543,20 +579,41 @@
           grp.className = 'step-group';
 
           for (let s = 0; s < GROUP_SZ; s++) {
-            const stepIdx = g * GROUP_SZ + s;
-            const flags   = getTrigFlags(trigBits, stepIdx);
-            const isOn    = (flags & AR_TRIG_ENABLE) !== 0;
-            const beyond  = stepIdx >= numSteps;
+            const stepIdx  = g * GROUP_SZ + s;
+            const flags    = getTrigFlags(trigBits, stepIdx);
+            const isOn     = (flags & AR_TRIG_ENABLE) !== 0;
+            const isAccent = (flags & AR_TRIG_ACCENT) !== 0;
+            const isMute   = (flags & AR_TRIG_MUTE)   !== 0;
+            const isRetrig = (flags & AR_TRIG_RETRIG) !== 0;
+            const isSwing  = (flags & AR_TRIG_SWING)  !== 0;
+            const isSlide  = (flags & AR_TRIG_SLIDE)  !== 0;
+            const beyond   = stepIdx >= numSteps;
 
             const cell = document.createElement('div');
-            cell.className = 'step'
-              + (isOn    ? ' on'       : '')
-              + (beyond  ? ' inactive' : '');
+            let cls = 'step';
+            if (isOn)                       cls += ' on';
+            if (isOn && isAccent && !isMute) cls += ' accent';
+            if (isOn && isMute)             cls += ' mute';
+            if (beyond)                     cls += ' inactive';
+            cell.className = cls;
 
-            // Tooltip: track name, step number, trig flags
+            // Modifier dots (only on triggered steps)
+            if (isOn) {
+              if (isRetrig) { const d = document.createElement('div'); d.className = 'trig-dot retrig'; cell.appendChild(d); }
+              if (isSwing)  { const d = document.createElement('div'); d.className = 'trig-dot swing';  cell.appendChild(d); }
+              if (isSlide)  { const d = document.createElement('div'); d.className = 'trig-dot slide';  cell.appendChild(d); }
+            }
+
+            // Tooltip
+            const modParts = [];
+            if (isAccent) modParts.push('ACCENT');
+            if (isMute)   modParts.push('MUTE');
+            if (isRetrig) modParts.push('RETRIG');
+            if (isSwing)  modParts.push('SWING');
+            if (isSlide)  modParts.push('SLIDE');
             cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
-              + (isOn   ? ' · TRIG'   : '')
-              + (beyond ? ' · beyond' : '');
+              + (isOn    ? ' · TRIG' + (modParts.length ? ' [' + modParts.join(', ') + ']' : '') : '')
+              + (beyond  ? ' · beyond' : '');
 
             grp.appendChild(cell);
           }
