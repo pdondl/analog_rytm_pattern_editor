@@ -316,16 +316,32 @@
     const AR_TRIG_MUTE               = 0x0004;  // bit 2
     const AR_TRIG_ACCENT             = 0x0008;  // bit 3
     const AR_TRIG_SWING              = 0x0010;  // bit 4
-    const AR_TRIG_SLIDE              = 0x0020;  // bit 5
-    // Bits 6-13: one bit per plock slot — set when that slot has a value for this step.
-    // (Inferred from libanalogrytm: 14-bit trig field, bits 0-5 are the standard flags above.)
-    const AR_TRIG_PLOCK_MASK         = 0x3FC0;  // bits 6-13
+    const AR_TRIG_SLIDE              = 0x0020;  // bit  5: slide
+    // Bits 6-13 — plock enable / state flags (from pattern.h AR_TRIG_xxx):
+    const AR_TRIG_LFO_PL_EN          = 0x0040;  // bit  6: enable LFO p-lock
+    const AR_TRIG_SYN_PL_SW          = 0x0080;  // bit  7: p-locked SYN state  (default-set on ALL triggered steps)
+    const AR_TRIG_SMP_PL_SW          = 0x0100;  // bit  8: p-locked SMP state  (default-set on ALL triggered steps)
+    const AR_TRIG_ENV_PL_SW          = 0x0200;  // bit  9: p-locked ENV state  (default-set on ALL triggered steps)
+    const AR_TRIG_LFO_PL_SW          = 0x0400;  // bit 10: p-locked LFO state  (default-set on ALL triggered steps)
+    const AR_TRIG_SYN_PL_EN          = 0x0800;  // bit 11: enable SYN p-lock
+    const AR_TRIG_SMP_PL_EN          = 0x1000;  // bit 12: enable SMP p-lock
+    const AR_TRIG_ENV_PL_EN          = 0x2000;  // bit 13: enable ENV p-lock
+    // NOTE: the _SW bits are set by default_trig_flags on every triggered step, so they
+    // cannot be used to detect user-placed plocks. Use the plock_seqs scan instead.
+
     const AR_NUM_TRACKS              = 13;
     const AR_NUM_STEPS               = 64;
     const TRACK_V5_SZ                = 0x0281;  // 641 bytes / track (FW1.70)
-    const TRIG_BITS_OFFSET           = 0;       // trig_bits[112] at track offset 0
-    const NUM_STEPS_OFFSET           = 0x0235;  // num_steps at track offset 0x235
-    const TRACK_SPEED_OFFSET         = 0x027B;  // flags_and_speed; bits 2–0 = speed
+    const TRIG_BITS_OFFSET           = 0;       // trig_bits[112] at track struct offset 0
+    const NUM_STEPS_OFFSET           = 0x0235;  // num_steps  — struct offset (pattern @0x0239 for track 0)
+    const TRACK_SPEED_OFFSET         = 0x0277;  // flags_and_speed — struct offset (pattern @0x027B for track 0)
+    // P-Lock sequences: ar_plock_seq_t plock_seqs[72] at pattern raw offset 0x2091.
+    // Each seq: [plock_type u8][track_nr u8][data u8 × 64] = 66 bytes.
+    // Active seq: plock_type != 0xFF && track_nr != 0xFF.
+    // data[stepIdx] == 0xFF means no lock for that step (same 0xFF=unused convention as notes/velocities).
+    const PLOCK_SEQS_BASE            = 0x2091;  // pattern offset of plock_seqs[0]
+    const PLOCK_SEQ_SZ               = 0x42;    // 66 bytes per plock_seq
+    const NUM_PLOCK_SEQS             = 72;
     const MASTER_LENGTH_OFFSET       = 0x3321;  // master_length (s_u16_t, little-endian)
     const KIT_NUMBER_OFFSET          = 0x3325;  // kit_number (0–127, 0xFF=unsaved)
     const SWING_AMOUNT_OFFSET        = 0x3326;  // swing_amount (0=50%, 1–30=51–80%)
@@ -639,6 +655,28 @@
       // Swing amount: 0 = 50% (no swing), 1–30 = 51–80%.
       const swingAmount = (raw.length > SWING_AMOUNT_OFFSET) ? raw[SWING_AMOUNT_OFFSET] : 0;
 
+      // ── Scan plock_seqs to build a per-track, per-step plock presence map ──
+      // This is the authoritative source: the _SW trig-flag bits are set by
+      // default_trig_flags on every triggered step, so they cannot be used for
+      // plock detection. We scan the actual plock_seqs instead.
+      //
+      // plockMap[track][step] = 1  when any active plock_seq for that track has
+      // data[step] != 0xFF (0xFF = "no lock for this step", same convention as
+      // notes / velocities / note_lengths).
+      const plockMap = Array.from({length: AR_NUM_TRACKS}, () => new Uint8Array(AR_NUM_STEPS));
+      const plockSeqsEnd = PLOCK_SEQS_BASE + NUM_PLOCK_SEQS * PLOCK_SEQ_SZ;
+      if (raw.length >= plockSeqsEnd) {
+        for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
+          const base   = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
+          const plType = raw[base];
+          const trkNr  = raw[base + 1];
+          if (plType === 0xFF || trkNr === 0xFF || trkNr >= AR_NUM_TRACKS) continue;
+          for (let s = 0; s < AR_NUM_STEPS; s++) {
+            if (raw[base + 2 + s] !== 0xFF) plockMap[trkNr][s] = 1;
+          }
+        }
+      }
+
       // ── X-centre of step pageIdx (0-31) inside the track-steps container ──
       // groupWidth = 16*32 + 15*2 = 542 px
       function stepCenterX(pageIdx) {
@@ -715,14 +753,15 @@
             const pageIdx  = g * GROUP_SZ + s;
             const stepIdx  = stepOffset + pageIdx;
             const flags    = getTrigFlags(trigBits, stepIdx);
-            const isOn     = (flags & AR_TRIG_ENABLE)    !== 0;
-            const isAccent = (flags & AR_TRIG_ACCENT)    !== 0;
-            const isMute   = (flags & AR_TRIG_MUTE)      !== 0;
-            const isRetrig = (flags & AR_TRIG_RETRIG)    !== 0;
-            const hasSwing = (flags & AR_TRIG_SWING)     !== 0;
-            const isSlide  = (flags & AR_TRIG_SLIDE)     !== 0;
-            const hasPlock = (flags & AR_TRIG_PLOCK_MASK) !== 0;
+            const isOn     = (flags & AR_TRIG_ENABLE) !== 0;
+            const isAccent = (flags & AR_TRIG_ACCENT) !== 0;
+            const isMute   = (flags & AR_TRIG_MUTE)   !== 0;
+            const isRetrig = (flags & AR_TRIG_RETRIG) !== 0;
+            const hasSwing = (flags & AR_TRIG_SWING)  !== 0;
+            const isSlide  = (flags & AR_TRIG_SLIDE)  !== 0;
             const beyond   = stepIdx >= numSteps;
+            // Plock detection via plock_seqs (not trig flags — see note above).
+            const hasPlock = !beyond && plockMap[t][stepIdx] !== 0;
 
             // Collect info for slide lines (only within active track length)
             if (!beyond) {
@@ -735,11 +774,11 @@
 
             if (isOn) {
               cls += ' on';
-              if (isAccent && !isMute)     cls += ' accent';
-              if (isMute)                  cls += ' mute';
-              if (!beyond && hasPlock)     cls += ' has-plock';
-            } else if (!beyond && hasPlock) {
-              // Lock trig: plock without a sound trigger
+              if (isAccent && !isMute) cls += ' accent';
+              if (isMute)              cls += ' mute';
+              if (hasPlock)            cls += ' has-plock';
+            } else if (hasPlock) {
+              // Lock trig: parameter lock on a non-triggered step (yellow on hardware)
               cls += ' lock-trig';
             }
 
@@ -762,10 +801,10 @@
             if (hasSwing && swingAmount !== 0) modParts.push('SWING');
             if (isSlide)  modParts.push('SLIDE');
             cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
-              + (isOn                       ? ' · TRIG' : '')
-              + (!isOn && hasPlock && !beyond ? ' · LOCK' : '')
-              + (modParts.length ? ' [' + modParts.join(', ') + ']' : '')
-              + (beyond ? ' · beyond' : '');
+              + (isOn              ? ' · TRIG' : '')
+              + (!isOn && hasPlock ? ' · LOCK' : '')
+              + (modParts.length   ? ' [' + modParts.join(', ') + ']' : '')
+              + (beyond            ? ' · beyond' : '');
 
             grp.appendChild(cell);
           }
