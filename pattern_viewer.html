@@ -293,7 +293,7 @@
     const MASTER_LENGTH_OFFSET       = 0x3321;  // master_length (s_u16_t, little-endian)
     const KIT_NUMBER_OFFSET          = 0x3325;  // kit_number (0–127, 0xFF=unsaved)
     const SWING_AMOUNT_OFFSET        = 0x3326;  // swing_amount (0=50%, 1–30=51–80%)
-    const BPM_MSB_OFFSET             = 0x332A;  // BPM high byte (value/10 = BPM)
+    const BPM_MSB_OFFSET             = 0x332A;  // BPM high byte (value/120 = BPM)
     const BPM_LSB_OFFSET             = 0x332B;  // BPM low byte
 
     // Track speed: bits 2–0 of flags_and_speed
@@ -484,7 +484,7 @@
       const kitStr     = (kitNum === 0xFF) ? '—' : String(kitNum + 1).padStart(2, '0');
       const bpmRaw     = raw.length > BPM_LSB_OFFSET
         ? (raw[BPM_MSB_OFFSET] << 8) | raw[BPM_LSB_OFFSET] : 0;
-      const bpmStr     = bpmRaw ? (bpmRaw / 10).toFixed(1) : '—';
+      const bpmStr     = bpmRaw ? (bpmRaw / 120).toFixed(1) : '—';
       const swingAmt   = raw.length > SWING_AMOUNT_OFFSET  ? raw[SWING_AMOUNT_OFFSET]  : 0;
       const masterLen  = raw.length > MASTER_LENGTH_OFFSET + 1
         ? raw[MASTER_LENGTH_OFFSET] | (raw[MASTER_LENGTH_OFFSET + 1] << 8) : 0;
