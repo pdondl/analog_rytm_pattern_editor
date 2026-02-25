@@ -14,7 +14,7 @@
       --accent:     #e05a00;
       --trig-on:    #e05a00;
       --trig-off:   #202020;
-      --step-size:  16px;
+      --step-size:  32px;
       --step-gap:   2px;
       --group-gap:  8px;
     }
@@ -124,7 +124,7 @@
     .ruler-num {
       width: var(--step-size);
       text-align: center;
-      font-size: 9px;
+      font-size: 11px;
       color: var(--muted);
       line-height: 1;
     }
@@ -186,14 +186,25 @@
     /* Trig modifier dots */
     .trig-dot {
       position: absolute;
-      width: 3px;
-      height: 3px;
+      width: 4px;
+      height: 4px;
       border-radius: 50%;
       pointer-events: none;
     }
-    .trig-dot.retrig { top:    1px; right: 1px; background: #ddcc22; }
-    .trig-dot.swing  { bottom: 1px; left:  1px; background: #4499ff; }
-    .trig-dot.slide  { bottom: 1px; right: 1px; background: #44cc77; }
+    .trig-dot.retrig { top:    2px; right: 2px; background: #ddcc22; }
+    .trig-dot.swing  { bottom: 2px; left:  2px; background: #4499ff; }
+    .trig-dot.slide  { bottom: 2px; right: 2px; background: #44cc77; }
+
+    /* Page toggle */
+    .page-ctrl {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+    }
+    .page-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
 
     /* Group separator lines */
     .group-sep {
@@ -227,6 +238,11 @@
   <div id="port-info"></div>
   <div id="pattern-meta"></div>
 
+  <div class="page-ctrl">
+    <button id="btn-page0" class="page-btn active">1 &ndash; 32</button>
+    <button id="btn-page1" class="page-btn">33 &ndash; 64</button>
+  </div>
+
   <div id="grid-wrap">
     <div class="grid" id="grid"></div>
   </div>
@@ -240,7 +256,7 @@
       <span style="color:#606060">&#9632;</span>&thinsp;mute &mdash;
     Dots:
       <span style="color:#ddcc22">&#9679;</span>&thinsp;retrig &ensp;
-      <span style="color:#4499ff">&#9679;</span>&thinsp;swing &ensp;
+      <span style="color:#4499ff">&#9679;</span>&thinsp;swing (hidden when pattern swing = 50%) &ensp;
       <span style="color:#44cc77">&#9679;</span>&thinsp;slide.<br>
     FW 1.70 binary format (compatible with 1.72).
   </div>
@@ -264,6 +280,7 @@
     const TRACK_V5_SZ                = 0x0281;  // 641 bytes / track (FW1.70)
     const TRIG_BITS_OFFSET           = 0;       // trig_bits[112] at track offset 0
     const NUM_STEPS_OFFSET           = 0x0235;  // num_steps at track offset 0x235
+    const SWING_AMOUNT_OFFSET        = 0x3326;  // swing_amount (0=50%, 1–30=51–80%)
 
     // Workbuffer pattern request:
     //   F0 00 20 3C 07 <devId=0> <reqId=0x6A> <verHi=01> <verLo=01>
@@ -288,11 +305,15 @@
     let rytmOutput  = null;
     let sysexBuf    = [];
     let inSysex     = false;
+    let lastRaw     = null;
+    let stepPage    = 0;
 
     // ─── UI refs ──────────────────────────────────────────────────────────────
 
     const btnConnect  = document.getElementById('btn-connect');
     const btnRefresh  = document.getElementById('btn-refresh');
+    const btnPage0    = document.getElementById('btn-page0');
+    const btnPage1    = document.getElementById('btn-page1');
     const statusEl    = document.getElementById('status');
     const portInfoEl  = document.getElementById('port-info');
     const metaEl      = document.getElementById('pattern-meta');
@@ -361,6 +382,20 @@
         btnRefresh.disabled = true;
       }
     }
+
+    btnPage0.addEventListener('click', () => {
+      stepPage = 0;
+      btnPage0.classList.add('active');
+      btnPage1.classList.remove('active');
+      if (lastRaw) renderGrid(lastRaw, stepPage);
+    });
+
+    btnPage1.addEventListener('click', () => {
+      stepPage = 1;
+      btnPage1.classList.add('active');
+      btnPage0.classList.remove('active');
+      if (lastRaw) renderGrid(lastRaw, stepPage);
+    });
 
     // Auto-connect on page load
     connectMidi();
@@ -433,7 +468,8 @@
         'Raw: <span>' + raw.length + ' bytes</span>  ' +
         'Ver: <span>' + syx[7] + '.' + syx[8] + '</span>';
 
-      renderGrid(raw);
+      lastRaw = raw;
+      renderGrid(raw, stepPage);
       setStatus('Ready', 'ok');
     }
 
@@ -525,11 +561,16 @@
     //     trig_bits[112] at track offset 0     (14 bits per step, 64 steps)
     //     num_steps      at track offset 0x235 (1..64)
 
-    function renderGrid(raw) {
+    function renderGrid(raw, page) {
       gridEl.innerHTML = '';
 
-      const GROUPS    = 4;
-      const GROUP_SZ  = 16;
+      const GROUPS     = 2;
+      const GROUP_SZ   = 16;
+      const stepOffset = page * 32;
+
+      // Swing amount: 0 = 50% (no swing), 1–30 = 51–80%.
+      // Only show swing dots when swing is actually active.
+      const swingAmount = (raw.length > SWING_AMOUNT_OFFSET) ? raw[SWING_AMOUNT_OFFSET] : 0;
 
       // ── Ruler (step numbers) ──────────────────────────────────────────────
       const ruler = document.createElement('div');
@@ -547,8 +588,7 @@
         for (let s = 0; s < GROUP_SZ; s++) {
           const n = document.createElement('div');
           n.className = 'ruler-num';
-          const stepNum = g * GROUP_SZ + s + 1;
-          // Show number only on steps 1, 5, 9, 13 of each group
+          const stepNum = stepOffset + g * GROUP_SZ + s + 1;
           if (stepNum % 4 === 1) n.textContent = stepNum;
           grp.appendChild(n);
         }
@@ -579,28 +619,28 @@
           grp.className = 'step-group';
 
           for (let s = 0; s < GROUP_SZ; s++) {
-            const stepIdx  = g * GROUP_SZ + s;
+            const stepIdx  = stepOffset + g * GROUP_SZ + s;
             const flags    = getTrigFlags(trigBits, stepIdx);
             const isOn     = (flags & AR_TRIG_ENABLE) !== 0;
             const isAccent = (flags & AR_TRIG_ACCENT) !== 0;
             const isMute   = (flags & AR_TRIG_MUTE)   !== 0;
             const isRetrig = (flags & AR_TRIG_RETRIG) !== 0;
-            const isSwing  = (flags & AR_TRIG_SWING)  !== 0;
+            const hasSwing = (flags & AR_TRIG_SWING)  !== 0;
             const isSlide  = (flags & AR_TRIG_SLIDE)  !== 0;
             const beyond   = stepIdx >= numSteps;
 
             const cell = document.createElement('div');
             let cls = 'step';
-            if (isOn)                       cls += ' on';
+            if (isOn)                        cls += ' on';
             if (isOn && isAccent && !isMute) cls += ' accent';
-            if (isOn && isMute)             cls += ' mute';
-            if (beyond)                     cls += ' inactive';
+            if (isOn && isMute)              cls += ' mute';
+            if (beyond)                      cls += ' inactive';
             cell.className = cls;
 
             // Modifier dots (only on triggered steps)
             if (isOn) {
               if (isRetrig) { const d = document.createElement('div'); d.className = 'trig-dot retrig'; cell.appendChild(d); }
-              if (isSwing)  { const d = document.createElement('div'); d.className = 'trig-dot swing';  cell.appendChild(d); }
+              if (hasSwing && swingAmount !== 0) { const d = document.createElement('div'); d.className = 'trig-dot swing'; cell.appendChild(d); }
               if (isSlide)  { const d = document.createElement('div'); d.className = 'trig-dot slide';  cell.appendChild(d); }
             }
 
@@ -609,7 +649,7 @@
             if (isAccent) modParts.push('ACCENT');
             if (isMute)   modParts.push('MUTE');
             if (isRetrig) modParts.push('RETRIG');
-            if (isSwing)  modParts.push('SWING');
+            if (hasSwing && swingAmount !== 0) modParts.push('SWING');
             if (isSlide)  modParts.push('SLIDE');
             cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
               + (isOn    ? ' · TRIG' + (modParts.length ? ' [' + modParts.join(', ') + ']' : '') : '')
