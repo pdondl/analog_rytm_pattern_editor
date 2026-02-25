@@ -271,18 +271,25 @@
 
     // ─── MIDI connect ─────────────────────────────────────────────────────────
 
-    btnConnect.addEventListener('click', async () => {
-      setStatus('Requesting MIDI access…');
+    async function connectMidi() {
+      setStatus('Connecting to MIDI…');
       try {
         midiAccess = await navigator.requestMIDIAccess({ sysex: true });
       } catch (e) {
         setStatus('MIDI access denied: ' + e.message, 'err');
         return;
       }
-      midiAccess.onstatechange = () => findPorts();
+      midiAccess.onstatechange = () => {
+        const hadRytm = !!(rytmInput && rytmOutput);
+        findPorts();
+        // Auto-request when Analog Rytm appears (e.g. USB plug-in after load)
+        if (!hadRytm && rytmInput && rytmOutput) requestPattern();
+      };
       findPorts();
-    });
+      if (rytmInput && rytmOutput) requestPattern();
+    }
 
+    btnConnect.addEventListener('click', connectMidi);
     btnRefresh.addEventListener('click', requestPattern);
 
     function findPorts() {
@@ -318,6 +325,9 @@
         btnRefresh.disabled = true;
       }
     }
+
+    // Auto-connect on page load
+    connectMidi();
 
     function requestPattern() {
       if (!rytmOutput) return;
