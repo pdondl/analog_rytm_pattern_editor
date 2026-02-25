@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Analog Rytm Pattern Viewer</title>
+  <style>
+    :root {
+      --bg:         #111;
+      --surface:    #1c1c1c;
+      --border:     #2a2a2a;
+      --fg:         #ddd;
+      --muted:      #555;
+      --accent:     #e05a00;
+      --trig-on:    #e05a00;
+      --trig-off:   #202020;
+      --step-size:  16px;
+      --step-gap:   2px;
+      --group-gap:  8px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      padding: 28px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      color: var(--accent);
+      font-size: 1.1em;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 0.8em;
+      letter-spacing: 1px;
+      margin-bottom: 24px;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    button {
+      background: var(--surface);
+      border: 1px solid #3a3a3a;
+      color: var(--fg);
+      padding: 7px 16px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.85em;
+      letter-spacing: 1px;
+      border-radius: 2px;
+    }
+    button:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    button:disabled { opacity: 0.35; cursor: default; }
+
+    #status {
+      font-size: 0.8em;
+      padding: 6px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      color: var(--muted);
+    }
+    #status.ok  { color: #5cb85c; border-color: #2d4a2d; }
+    #status.err { color: #d9534f; border-color: #4a2d2d; }
+
+    #port-info {
+      font-size: 0.75em;
+      color: var(--muted);
+      margin-bottom: 20px;
+      min-height: 1em;
+    }
+
+    /* Pattern meta info */
+    #pattern-meta {
+      font-size: 0.8em;
+      color: var(--muted);
+      margin-bottom: 14px;
+      letter-spacing: 1px;
+      min-height: 1em;
+    }
+    #pattern-meta span { color: var(--fg); }
+
+    /* Grid */
+    #grid-wrap { overflow-x: auto; padding-bottom: 8px; }
+
+    .grid {
+      display: inline-block;
+      white-space: nowrap;
+    }
+
+    /* Step-number ruler */
+    .ruler-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .track-label-space {
+      flex: 0 0 42px;
+    }
+    .ruler-groups {
+      display: flex;
+      gap: var(--group-gap);
+    }
+    .ruler-group {
+      display: flex;
+      gap: var(--step-gap);
+    }
+    .ruler-num {
+      width: var(--step-size);
+      text-align: center;
+      font-size: 9px;
+      color: var(--muted);
+      line-height: 1;
+    }
+
+    /* Track rows */
+    .track-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 3px;
+    }
+    .track-label {
+      flex: 0 0 42px;
+      text-align: right;
+      padding-right: 10px;
+      font-size: 0.75em;
+      color: var(--muted);
+      letter-spacing: 1px;
+    }
+    .track-steps {
+      display: flex;
+      gap: var(--group-gap);
+    }
+    .step-group {
+      display: flex;
+      gap: var(--step-gap);
+    }
+
+    .step {
+      width: var(--step-size);
+      height: var(--step-size);
+      border-radius: 1px;
+      background: var(--trig-off);
+      border: 1px solid #2a2a2a;
+      cursor: default;
+      flex-shrink: 0;
+    }
+    .step.on {
+      background: var(--trig-on);
+      border-color: #ff7722;
+      box-shadow: 0 0 5px rgba(224, 90, 0, 0.4);
+    }
+    /* Steps beyond track length are dimmed */
+    .step.inactive {
+      opacity: 0.2;
+    }
+
+    /* Group separator lines */
+    .group-sep {
+      width: 1px;
+      height: var(--step-size);
+      background: #2a2a2a;
+      flex-shrink: 0;
+      align-self: center;
+    }
+
+    .note {
+      margin-top: 22px;
+      font-size: 0.72em;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .note a { color: #666; }
+  </style>
+</head>
+<body>
+
+  <h1>Analog Rytm Pattern Viewer</h1>
+  <div class="subtitle">USB MIDI &mdash; Workbuffer &mdash; Step trigs</div>
+
+  <div class="controls">
+    <button id="btn-connect">Connect MIDI</button>
+    <button id="btn-refresh" disabled>Request Pattern</button>
+    <div id="status">Not connected</div>
+  </div>
+
+  <div id="port-info"></div>
+  <div id="pattern-meta"></div>
+
+  <div id="grid-wrap">
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <div class="note">
+    Connects to the first MIDI port whose name contains "rytm" (case-insensitive).<br>
+    Requests the current workbuffer pattern via SysEx. Bright cells = active trigs.<br>
+    Dimmed cells = beyond the track&rsquo;s configured step count.<br>
+    FW 1.70 binary format (compatible with 1.72).
+  </div>
+
+  <script>
+    // ─── Constants from libanalogrytm/sysex.h and pattern.h ──────────────────
+
+    const AR_PRODUCT_ID              = 0x07;
+    const AR_ELEKTRON_MFR_1          = 0x20;
+    const AR_ELEKTRON_MFR_2          = 0x3C;
+    const AR_SYSEX_DUMP_ID_PATTERN   = 0x54;   // saved pattern dump
+    const AR_SYSEX_DUMPX_ID_PATTERN  = 0x5A;   // workbuffer pattern dump
+    const AR_TRIG_ENABLE             = 0x0001;  // bit 0 of 14-bit trig flags
+    const AR_NUM_TRACKS              = 13;
+    const AR_NUM_STEPS               = 64;
+    const TRACK_V5_SZ                = 0x0281;  // 641 bytes / track (FW1.70)
+    const TRIG_BITS_OFFSET           = 0;       // trig_bits[112] at track offset 0
+    const NUM_STEPS_OFFSET           = 0x0235;  // num_steps at track offset 0x235
+
+    // Workbuffer pattern request:
+    //   F0 00 20 3C 07 <devId=0> <reqId=0x6A> <verHi=01> <verLo=01>
+    //   <objNr=0> 00 00 00 05 F7
+    // 0x6A = AR_SYSEX_REQUESTX_ID_BASE (0x68) + AR_TYPE_PATTERN (0x02)
+    const PATTERN_REQUEST_X = new Uint8Array([
+      0xF0, 0x00, 0x20, 0x3C, 0x07,
+      0x00,       // devId = 0
+      0x6A,       // AR_SYSEX_REQUESTX_ID_PATTERN (workbuffer)
+      0x01, 0x01, // container version 1.1
+      0x00,       // object number (& 0x7F = 0)
+      0x00, 0x00, 0x00, 0x05,
+      0xF7
+    ]);
+
+    const TRACK_NAMES = ['BD','SD','RS','CP','BT','LT','MT','HT','CH','OH','CY','CB','FX'];
+
+    // ─── State ────────────────────────────────────────────────────────────────
+
+    let midiAccess  = null;
+    let rytmInput   = null;
+    let rytmOutput  = null;
+    let sysexBuf    = [];
+    let inSysex     = false;
+
+    // ─── UI refs ──────────────────────────────────────────────────────────────
+
+    const btnConnect  = document.getElementById('btn-connect');
+    const btnRefresh  = document.getElementById('btn-refresh');
+    const statusEl    = document.getElementById('status');
+    const portInfoEl  = document.getElementById('port-info');
+    const metaEl      = document.getElementById('pattern-meta');
+    const gridEl      = document.getElementById('grid');
+
+    // ─── UI helpers ───────────────────────────────────────────────────────────
+
+    function setStatus(msg, cls) {
+      statusEl.textContent = msg;
+      statusEl.className   = cls || '';
+    }
+
+    // ─── MIDI connect ─────────────────────────────────────────────────────────
+
+    btnConnect.addEventListener('click', async () => {
+      setStatus('Requesting MIDI access…');
+      try {
+        midiAccess = await navigator.requestMIDIAccess({ sysex: true });
+      } catch (e) {
+        setStatus('MIDI access denied: ' + e.message, 'err');
+        return;
+      }
+      midiAccess.onstatechange = () => findPorts();
+      findPorts();
+    });
+
+    btnRefresh.addEventListener('click', requestPattern);
+
+    function findPorts() {
+      rytmInput  = null;
+      rytmOutput = null;
+
+      const inNames  = [];
+      const outNames = [];
+
+      for (const [, p] of midiAccess.inputs) {
+        inNames.push(p.name);
+        if (p.name.toLowerCase().includes('rytm')) {
+          rytmInput = p;
+        }
+      }
+      for (const [, p] of midiAccess.outputs) {
+        outNames.push(p.name);
+        if (p.name.toLowerCase().includes('rytm')) {
+          rytmOutput = p;
+        }
+      }
+
+      portInfoEl.textContent =
+        'IN: ' + (inNames.join(', ') || '—') +
+        '   OUT: ' + (outNames.join(', ') || '—');
+
+      if (rytmInput && rytmOutput) {
+        rytmInput.onmidimessage = onMidiMessage;
+        setStatus('Connected → ' + rytmInput.name, 'ok');
+        btnRefresh.disabled = false;
+      } else {
+        setStatus('Analog Rytm not found — connect the device and try again.', 'err');
+        btnRefresh.disabled = true;
+      }
+    }
+
+    function requestPattern() {
+      if (!rytmOutput) return;
+      sysexBuf = [];
+      inSysex  = false;
+      setStatus('Requesting pattern…');
+      rytmOutput.send(PATTERN_REQUEST_X);
+    }
+
+    // ─── Receive & reassemble SysEx ───────────────────────────────────────────
+    // Web MIDI may deliver large SysEx messages in chunks, so we buffer until F7.
+
+    function onMidiMessage(ev) {
+      const data = ev.data;
+      for (let i = 0; i < data.length; i++) {
+        const b = data[i];
+        if (b === 0xF0) {
+          inSysex  = true;
+          sysexBuf = [0xF0];
+        } else if (inSysex) {
+          sysexBuf.push(b);
+          if (b === 0xF7) {
+            inSysex = false;
+            handleSysex(new Uint8Array(sysexBuf));
+            sysexBuf = [];
+          }
+        }
+      }
+    }
+
+    // ─── SysEx handler ────────────────────────────────────────────────────────
+
+    function handleSysex(syx) {
+      // Validate Elektron Analog Rytm pattern dump header (10 bytes):
+      //   [F0][00][20][3C][07][devId][dumpId][verHi][verLo][objNr]
+      if (syx.length < 20) return;
+      if (syx[0] !== 0xF0)           return;
+      if (syx[1] !== 0x00)           return;
+      if (syx[2] !== AR_ELEKTRON_MFR_1) return;
+      if (syx[3] !== AR_ELEKTRON_MFR_2) return;
+      if (syx[4] !== AR_PRODUCT_ID)     return;
+
+      const dumpId = syx[6];
+      const isPattern =
+        dumpId === AR_SYSEX_DUMP_ID_PATTERN ||   // 0x54: saved-slot dump
+        dumpId === AR_SYSEX_DUMPX_ID_PATTERN;    // 0x5A: workbuffer dump
+
+      if (!isPattern) return;
+
+      const objNr   = syx[9];
+      const isWB    = (dumpId === AR_SYSEX_DUMPX_ID_PATTERN);
+      const patName = isWB ? 'Workbuffer' : patternSlotName(objNr);
+
+      setStatus('Decoding ' + syx.length + ' bytes…');
+
+      let raw;
+      try {
+        raw = decodeSysex7to8(syx);
+      } catch (e) {
+        setStatus('Decode error: ' + e.message, 'err');
+        console.error(e);
+        return;
+      }
+
+      metaEl.innerHTML =
+        'Pattern: <span>' + patName + '</span>  ' +
+        'Raw: <span>' + raw.length + ' bytes</span>  ' +
+        'Ver: <span>' + syx[7] + '.' + syx[8] + '</span>';
+
+      renderGrid(raw);
+      setStatus('Ready', 'ok');
+    }
+
+    // Convert bank+number (0-based) → e.g. "A01"
+    function patternSlotName(n) {
+      const bank = String.fromCharCode(65 + Math.floor(n / 16));
+      const slot = String(1 + (n % 16)).padStart(2, '0');
+      return bank + slot;
+    }
+
+    // ─── 7-bit SysEx → 8-bit raw decode ──────────────────────────────────────
+    //
+    // Mirrors ar_sysex_decode() in sysex.c.
+    //
+    // SysEx message layout (all byte indices within syx[]):
+    //   [0..9]   : 10-byte header (F0 + 9 data bytes)
+    //   [10..-6] : encoded payload, syxDatSz bytes
+    //   [-5..-4] : checksum (2 bytes, 7-bit each)
+    //   [-3..-2] : data size (2 bytes, 7-bit each)
+    //   [-1]     : F7
+    //
+    // Every 8 payload bytes → 7 raw bytes:
+    //   byte 0 (msbs): bit6=MSB of out[0], bit5=MSB of out[1], … bit0=MSB of out[6]
+    //   bytes 1..7   : lower 7 bits of out[0..6]
+
+    function decodeSysex7to8(syx) {
+      const dataStart = 10;
+      const dataEnd   = syx.length - 5;  // chkHi chkLo szHi szLo F7
+      const syxDatSz  = dataEnd - dataStart;
+
+      if (syxDatSz <= 0) throw new Error('Empty payload');
+
+      const raw  = [];
+      let pkbNr  = 0;
+      let msbs   = 0;
+
+      for (let i = 0; i < syxDatSz; i++) {
+        const b = syx[dataStart + i];
+        if (pkbNr === 0) {
+          msbs = b;             // MSB accumulator byte
+        } else {
+          raw.push(b | (msbs & 0x80));  // restore high bit
+        }
+        msbs  = (msbs << 1) & 0xFF;    // shift MSB of next byte into position 7
+        pkbNr = (pkbNr + 1) & 7;
+      }
+
+      return new Uint8Array(raw);
+    }
+
+    // ─── Trig flags from packed 14-bit bitstream ──────────────────────────────
+    //
+    // Mirrors ar_pattern_track_get_trig_flags() in pattern.c.
+    //
+    // Each step's 14 trig bits are stored consecutively in a packed bit array.
+    // Bit 0 of the result = AR_TRIG_ENABLE.
+
+    function getTrigFlags(trigBits, stepIdx) {
+      const startBit = 14 * stepIdx;
+      const numBits  = 14;
+      let r        = 0;
+      let byteOff  = startBit >> 3;
+      let bitOff   = startBit - (byteOff << 3);
+      let outShift = numBits;
+      let bitsLeft = numBits;
+
+      while (bitsLeft > 0) {
+        const bitsAvail = 8 - bitOff;
+        if (bitsLeft < bitsAvail) {
+          outShift -= bitsLeft;
+          r |= ((trigBits[byteOff] >> (bitsAvail - bitsLeft)) & ((1 << bitsLeft) - 1)) << outShift;
+          bitsLeft = 0;
+        } else {
+          outShift -= bitsAvail;
+          r |= (trigBits[byteOff] & ((1 << bitsAvail) - 1)) << outShift;
+          bitsLeft -= bitsAvail;
+          bitOff    = 0;
+          byteOff++;
+        }
+      }
+      return r;
+    }
+
+    // ─── Render grid ──────────────────────────────────────────────────────────
+    //
+    // ar_pattern_t layout (V5 / FW1.70, raw 8-bit bytes):
+    //   magic[4]      @0
+    //   tracks[13]    @4, each TRACK_V5_SZ (641) bytes
+    //     trig_bits[112] at track offset 0     (14 bits per step, 64 steps)
+    //     num_steps      at track offset 0x235 (1..64)
+
+    function renderGrid(raw) {
+      gridEl.innerHTML = '';
+
+      const GROUPS    = 4;
+      const GROUP_SZ  = 16;
+
+      // ── Ruler (step numbers) ──────────────────────────────────────────────
+      const ruler = document.createElement('div');
+      ruler.className = 'ruler-row';
+
+      const rulerSpace = document.createElement('div');
+      rulerSpace.className = 'track-label-space';
+      ruler.appendChild(rulerSpace);
+
+      const rulerGroups = document.createElement('div');
+      rulerGroups.className = 'ruler-groups';
+      for (let g = 0; g < GROUPS; g++) {
+        const grp = document.createElement('div');
+        grp.className = 'ruler-group';
+        for (let s = 0; s < GROUP_SZ; s++) {
+          const n = document.createElement('div');
+          n.className = 'ruler-num';
+          const stepNum = g * GROUP_SZ + s + 1;
+          // Show number only on steps 1, 5, 9, 13 of each group
+          if (stepNum % 4 === 1) n.textContent = stepNum;
+          grp.appendChild(n);
+        }
+        rulerGroups.appendChild(grp);
+      }
+      ruler.appendChild(rulerGroups);
+      gridEl.appendChild(ruler);
+
+      // ── Track rows ────────────────────────────────────────────────────────
+      for (let t = 0; t < AR_NUM_TRACKS; t++) {
+        const trackBase  = 4 + t * TRACK_V5_SZ;
+        const trigBits   = raw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
+        const numSteps   = raw[trackBase + NUM_STEPS_OFFSET];
+
+        const row = document.createElement('div');
+        row.className = 'track-row';
+
+        const label = document.createElement('div');
+        label.className = 'track-label';
+        label.textContent = TRACK_NAMES[t];
+        row.appendChild(label);
+
+        const stepsWrap = document.createElement('div');
+        stepsWrap.className = 'track-steps';
+
+        for (let g = 0; g < GROUPS; g++) {
+          const grp = document.createElement('div');
+          grp.className = 'step-group';
+
+          for (let s = 0; s < GROUP_SZ; s++) {
+            const stepIdx = g * GROUP_SZ + s;
+            const flags   = getTrigFlags(trigBits, stepIdx);
+            const isOn    = (flags & AR_TRIG_ENABLE) !== 0;
+            const beyond  = stepIdx >= numSteps;
+
+            const cell = document.createElement('div');
+            cell.className = 'step'
+              + (isOn    ? ' on'       : '')
+              + (beyond  ? ' inactive' : '');
+
+            // Tooltip: track name, step number, trig flags
+            cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
+              + (isOn   ? ' · TRIG'   : '')
+              + (beyond ? ' · beyond' : '');
+
+            grp.appendChild(cell);
+          }
+          stepsWrap.appendChild(grp);
+        }
+
+        row.appendChild(stepsWrap);
+        gridEl.appendChild(row);
+      }
+    }
+  </script>
+</body>
+</html>
