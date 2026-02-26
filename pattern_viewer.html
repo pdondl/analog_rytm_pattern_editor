@@ -167,7 +167,7 @@
       border-radius: 1px;
       background: var(--trig-off);
       border: 1px solid #2a2a2a;
-      cursor: default;
+      cursor: pointer;
       flex-shrink: 0;
       position: relative;
     }
@@ -219,6 +219,11 @@
       border-width: 7px 7px 0 0;
       border-color: #cc44aa transparent transparent transparent;
     }
+    /* Inspected step: ring around the cell */
+    .step.inspected {
+      box-shadow: 0 0 0 2px #cc44aa !important;
+      z-index: 1;
+    }
     /* Outer wrapper for steps — provides positioning context for slide lines */
     .steps-outer {
       position: relative;
@@ -260,6 +265,126 @@
       line-height: 1.6;
     }
     .note a { color: #666; }
+
+    /* ── Step inspector panel ──────────────────────────────────────────────── */
+
+    .step-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: #131a20;
+      border: 1px solid #2a4a6a;
+      border-radius: 2px;
+      padding: 8px 10px;
+      margin-bottom: 6px;
+      white-space: normal;
+    }
+
+    .sp-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.72em;
+      color: var(--muted);
+      letter-spacing: 1px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #1e2e3a;
+    }
+    .sp-close {
+      background: none;
+      border: none;
+      color: #446;
+      font-size: 1.1em;
+      padding: 0 2px;
+      cursor: pointer;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+    .sp-close:hover { color: var(--fg); border: none; }
+
+    .sp-sections {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    /* Individual section box */
+    .sp-sec {
+      flex-shrink: 0;
+      background: #161e26;
+      border: 1px solid #1e2e3a;
+      border-radius: 2px;
+      padding: 5px 7px;
+    }
+    .sp-sec-head {
+      font-size: 0.62em;
+      color: #446688;
+      letter-spacing: 2px;
+      text-align: center;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
+
+    /* Flags column */
+    .sp-flags {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .sp-flag {
+      font-size: 0.68em;
+      padding: 2px 6px;
+      border: 1px solid #1e2e3a;
+      border-radius: 1px;
+      color: #334;
+      text-align: center;
+      letter-spacing: 1px;
+      min-width: 34px;
+    }
+    .sp-flag.on {
+      color: var(--accent);
+      border-color: #703000;
+      background: #1a0e00;
+    }
+
+    /* Parameter rows */
+    .sp-params {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .sp-param {
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+    }
+    .sp-lbl {
+      font-size: 0.65em;
+      color: #446;
+      text-align: right;
+      letter-spacing: 0.5px;
+      min-width: 28px;
+    }
+    .sp-val {
+      font-size: 0.78em;
+      color: var(--fg);
+      min-width: 26px;
+    }
+    .sp-val.locked {
+      color: #cc44aa;
+    }
+
+    /* SYN/SMP/ENV/LFO flag row inside TRIG section */
+    .sp-sw-row {
+      display: flex;
+      gap: 3px;
+      margin-top: 3px;
+    }
+    .sp-sw-row .sp-flag {
+      min-width: 26px;
+      font-size: 0.63em;
+    }
   </style>
 </head>
 <body>
@@ -287,7 +412,7 @@
 
   <div class="note">
     Connects to the first MIDI port whose name contains &ldquo;rytm&rdquo; (case-insensitive).<br>
-    Requests the current workbuffer pattern via SysEx. Dimmed cells = beyond track step count.<br>
+    Requests the current workbuffer pattern and kit via SysEx. Dimmed cells = beyond track step count.<br>
     Trig colours:
       <span style="color:#e05a00">&#9632;</span>&thinsp;normal &ensp;
       <span style="color:#ffbb44">&#9632;</span>&thinsp;accent &ensp;
@@ -298,7 +423,7 @@
       <span style="color:#ddcc22">&#9679;</span>&thinsp;retrig &ensp;
       <span style="color:#4499ff">&#9679;</span>&thinsp;swing (hidden when pattern swing = 50%).<br>
     Slide: <span style="color:#44cc77">&#9644;</span>&thinsp;green line below row, from slide step to next trig&thinsp;/&thinsp;lock (same page only).<br>
-    FW 1.70 binary format (compatible with 1.72).
+    <kbd style="color:#888">&#8984;+click</kbd> any step to inspect parameter locks. FW 1.70 binary format (compatible with 1.72).
   </div>
 
   <script>
@@ -309,61 +434,126 @@
     const AR_ELEKTRON_MFR_2          = 0x3C;
     const AR_SYSEX_DUMP_ID_PATTERN   = 0x54;   // saved pattern dump
     const AR_SYSEX_DUMPX_ID_PATTERN  = 0x5A;   // workbuffer pattern dump
-    const AR_TRIG_ENABLE             = 0x0001;  // bit 0 of 14-bit trig flags
+    const AR_SYSEX_DUMPX_ID_KIT      = 0x58;   // workbuffer kit dump
+    const AR_TRIG_ENABLE             = 0x0001;  // bit 0
     const AR_TRIG_RETRIG             = 0x0002;  // bit 1
     const AR_TRIG_MUTE               = 0x0004;  // bit 2
     const AR_TRIG_ACCENT             = 0x0008;  // bit 3
     const AR_TRIG_SWING              = 0x0010;  // bit 4
-    const AR_TRIG_SLIDE              = 0x0020;  // bit  5: slide
-    // Bits 6-13 — plock enable / state flags (from pattern.h AR_TRIG_xxx):
+    const AR_TRIG_SLIDE              = 0x0020;  // bit 5: slide
     const AR_TRIG_LFO_PL_EN          = 0x0040;  // bit  6: enable LFO p-lock
-    const AR_TRIG_SYN_PL_SW          = 0x0080;  // bit  7: p-locked SYN state  (default-set on ALL triggered steps)
-    const AR_TRIG_SMP_PL_SW          = 0x0100;  // bit  8: p-locked SMP state  (default-set on ALL triggered steps)
-    const AR_TRIG_ENV_PL_SW          = 0x0200;  // bit  9: p-locked ENV state  (default-set on ALL triggered steps)
-    const AR_TRIG_LFO_PL_SW          = 0x0400;  // bit 10: p-locked LFO state  (default-set on ALL triggered steps)
+    const AR_TRIG_SYN_PL_SW          = 0x0080;  // bit  7: SYN voices retrigger
+    const AR_TRIG_SMP_PL_SW          = 0x0100;  // bit  8: SMP voice retrigger
+    const AR_TRIG_ENV_PL_SW          = 0x0200;  // bit  9: ENV retrigger
+    const AR_TRIG_LFO_PL_SW          = 0x0400;  // bit 10: LFO retrigger
     const AR_TRIG_SYN_PL_EN          = 0x0800;  // bit 11: enable SYN p-lock
     const AR_TRIG_SMP_PL_EN          = 0x1000;  // bit 12: enable SMP p-lock
     const AR_TRIG_ENV_PL_EN          = 0x2000;  // bit 13: enable ENV p-lock
-    // NOTE: the _SW bits are set by default_trig_flags on every triggered step, so they
-    // cannot be used to detect user-placed plocks. Use the plock_seqs scan instead.
 
     const AR_NUM_TRACKS              = 13;
     const AR_NUM_STEPS               = 64;
     const TRACK_V5_SZ                = 0x0281;  // 641 bytes / track (FW1.70)
-    const TRIG_BITS_OFFSET           = 0;       // trig_bits[112] at track struct offset 0
-    const NUM_STEPS_OFFSET           = 0x0235;  // num_steps  — struct offset (pattern @0x0239 for track 0)
-    const TRACK_SPEED_OFFSET         = 0x0277;  // flags_and_speed — struct offset (pattern @0x027B for track 0)
-    // P-Lock sequences: ar_plock_seq_t plock_seqs[72] at pattern raw offset 0x2091.
-    // Each seq: [plock_type u8][track_nr u8][data u8 × 64] = 66 bytes.
-    // Active seq: plock_type != 0xFF && track_nr != 0xFF.
-    // data[stepIdx] == 0xFF means no lock for that step (same 0xFF=unused convention as notes/velocities).
-    const PLOCK_SEQS_BASE            = 0x2091;  // pattern offset of plock_seqs[0]
-    const PLOCK_SEQ_SZ               = 0x42;    // 66 bytes per plock_seq
-    const NUM_PLOCK_SEQS             = 72;
-    const MASTER_LENGTH_OFFSET       = 0x3321;  // master_length (s_u16_t, little-endian)
-    const KIT_NUMBER_OFFSET          = 0x3325;  // kit_number (0–127, 0xFF=unsaved)
-    const SWING_AMOUNT_OFFSET        = 0x3326;  // swing_amount (0=50%, 1–30=51–80%)
-    const BPM_MSB_OFFSET             = 0x332A;  // BPM high byte (value/120 = BPM)
-    const BPM_LSB_OFFSET             = 0x332B;  // BPM low byte
+    const TRIG_BITS_OFFSET           = 0;       // trig_bits[112] at track offset 0
 
-    // Track speed: bits 2–0 of flags_and_speed
+    // Track field offsets from track start in raw decoded pattern.
+    // Formula: @comment_in_pattern_h - 4 (the 4 magic bytes at pattern start).
+    const NOTE_OFFSET                = 0x0070;  // notes[64]       @0x0074
+    const VELOCITY_OFFSET            = 0x00B0;  // velocities[64]  @0x00B4
+    const NOTE_LEN_OFFSET            = 0x00F0;  // note_lengths[64]@0x00F4
+    const MICRO_TIMING_OFFSET        = 0x0130;  // micro_timings[64]@0x0134
+    const DEFAULT_NOTE_OFFSET        = 0x0230;  // default_note    @0x0234
+    const DEFAULT_VELOCITY_OFFSET    = 0x0231;  // default_velocity@0x0235
+    const DEFAULT_NOTE_LEN_OFFSET    = 0x0232;  // default_note_len@0x0236
+    const DEFAULT_TRIG_FLAGS_OFFSET  = 0x0233;  // default_trig_flags (s_u16_t, hi byte first) @0x0237
+    const NUM_STEPS_OFFSET           = 0x0235;  // num_steps       @0x0239
+    const TRACK_SPEED_OFFSET         = 0x0277;  // flags_and_speed @0x027B
+    const TRIG_PROBABILITY_OFFSET    = 0x0278;  // trig_probability@0x027C
+
+    // P-Lock sequences
+    const PLOCK_SEQS_BASE            = 0x2091;
+    const PLOCK_SEQ_SZ               = 0x42;    // 66 bytes
+    const NUM_PLOCK_SEQS             = 72;
+
+    // Pattern-level metadata
+    const MASTER_LENGTH_OFFSET       = 0x3321;
+    const KIT_NUMBER_OFFSET          = 0x3325;
+    const SWING_AMOUNT_OFFSET        = 0x3326;
+    const BPM_MSB_OFFSET             = 0x332A;
+    const BPM_LSB_OFFSET             = 0x332B;
+
+    // Kit raw layout
+    const KIT_TRACKS_BASE            = 0x002E;  // ar_sound_t tracks[12] @kit+0x002E
+    const AR_SOUND_V5_SZ             = 162;     // sizeof(ar_sound_t)
+
+    // Track speed labels
     const TRACK_SPEED_LABELS = ['2x', '3/2x', '1x', '3/4x', '1/2x', '1/4x', '1/8x'];
 
-    // Workbuffer pattern request:
-    //   F0 00 20 3C 07 <devId=0> <reqId=0x6A> <verHi=01> <verLo=01>
-    //   <objNr=0> 00 00 00 05 F7
-    // 0x6A = AR_SYSEX_REQUESTX_ID_BASE (0x68) + AR_TYPE_PATTERN (0x02)
+    // Workbuffer pattern request (0x6A)
     const PATTERN_REQUEST_X = new Uint8Array([
       0xF0, 0x00, 0x20, 0x3C, 0x07,
-      0x00,       // devId = 0
-      0x6A,       // AR_SYSEX_REQUESTX_ID_PATTERN (workbuffer)
-      0x01, 0x01, // container version 1.1
-      0x00,       // object number (& 0x7F = 0)
-      0x00, 0x00, 0x00, 0x05,
-      0xF7
+      0x00, 0x6A, 0x01, 0x01, 0x00,
+      0x00, 0x00, 0x00, 0x05, 0xF7
+    ]);
+
+    // Workbuffer kit request (0x68)
+    const KIT_REQUEST_X = new Uint8Array([
+      0xF0, 0x00, 0x20, 0x3C, 0x07,
+      0x00, 0x68, 0x01, 0x01, 0x00,
+      0x00, 0x00, 0x00, 0x05, 0xF7
     ]);
 
     const TRACK_NAMES = ['BD','SD','RS','CP','BT','LT','MT','HT','CH','OH','CY','CB','FX'];
+
+    // ─── Plock parameter info ─────────────────────────────────────────────────
+    // Maps plock_type → { section, label, soundOff }
+    // soundOff is the byte offset within ar_sound_t (s_u16_t fields: read the
+    // first/hi byte which carries the 0-127 value; lo byte is always 0).
+
+    const PLOCK_INFO = {
+      0x00: { sec:'SRC',  lbl:'P1',   sndOff:0x1C },
+      0x01: { sec:'SRC',  lbl:'P2',   sndOff:0x1E },
+      0x02: { sec:'SRC',  lbl:'P3',   sndOff:0x20 },
+      0x03: { sec:'SRC',  lbl:'P4',   sndOff:0x22 },
+      0x04: { sec:'SRC',  lbl:'P5',   sndOff:0x24 },
+      0x05: { sec:'SRC',  lbl:'P6',   sndOff:0x26 },
+      0x06: { sec:'SRC',  lbl:'P7',   sndOff:0x28 },
+      0x07: { sec:'SRC',  lbl:'P8',   sndOff:0x2A },
+      0x08: { sec:'SMPL', lbl:'TUN',  sndOff:0x2C },
+      0x09: { sec:'SMPL', lbl:'FIN',  sndOff:0x2E },
+      0x0A: { sec:'SMPL', lbl:'NR',   sndOff:0x30 },
+      0x0B: { sec:'SMPL', lbl:'BR',   sndOff:0x32 },
+      0x0C: { sec:'SMPL', lbl:'STA',  sndOff:0x34 },
+      0x0D: { sec:'SMPL', lbl:'END',  sndOff:0x36 },
+      0x0E: { sec:'SMPL', lbl:'LOOP', sndOff:0x38 },
+      0x0F: { sec:'SMPL', lbl:'LEV',  sndOff:0x3A },
+      0x10: { sec:'FLTR', lbl:'ATK',  sndOff:0x3C },
+      0x11: { sec:'FLTR', lbl:'SUS',  sndOff:0x3E },
+      0x12: { sec:'FLTR', lbl:'DEC',  sndOff:0x40 },
+      0x13: { sec:'FLTR', lbl:'REL',  sndOff:0x42 },
+      0x14: { sec:'FLTR', lbl:'FRQ',  sndOff:0x44 },
+      0x15: { sec:'FLTR', lbl:'RES',  sndOff:0x46 },
+      0x16: { sec:'FLTR', lbl:'TYP',  sndOff:0x48 },
+      0x17: { sec:'FLTR', lbl:'ENV',  sndOff:0x4A },
+      0x18: { sec:'AMP',  lbl:'ATK',  sndOff:0x4C },
+      0x19: { sec:'AMP',  lbl:'HLD',  sndOff:0x4E },
+      0x1A: { sec:'AMP',  lbl:'DEC',  sndOff:0x50 },
+      0x1B: { sec:'AMP',  lbl:'DRV',  sndOff:0x52 },
+      0x1C: { sec:'AMP',  lbl:'DLY',  sndOff:0x54 },
+      0x1D: { sec:'AMP',  lbl:'REV',  sndOff:0x56 },
+      0x1E: { sec:'AMP',  lbl:'PAN',  sndOff:0x58 },
+      0x1F: { sec:'AMP',  lbl:'VOL',  sndOff:0x5A },
+      // 0x20: unknown — skipped
+      0x21: { sec:'LFO',  lbl:'SPD',  sndOff:0x5E },
+      0x22: { sec:'LFO',  lbl:'MLT',  sndOff:0x60 },
+      0x23: { sec:'LFO',  lbl:'FAD',  sndOff:0x62 },
+      0x24: { sec:'LFO',  lbl:'DST',  sndOff:0x64 },
+      0x25: { sec:'LFO',  lbl:'WAV',  sndOff:0x66 },
+      0x26: { sec:'LFO',  lbl:'PHS',  sndOff:0x68 },
+      0x27: { sec:'LFO',  lbl:'MOD',  sndOff:0x6A },
+      0x28: { sec:'LFO',  lbl:'DEP',  sndOff:0x6C },
+    };
+
+    const SECTION_KEYS = ['SRC','SMPL','FLTR','AMP','LFO'];
 
     // ─── State ────────────────────────────────────────────────────────────────
 
@@ -372,8 +562,11 @@
     let rytmOutput  = null;
     let sysexBuf    = [];
     let inSysex     = false;
-    let lastRaw     = null;
+    let lastRaw     = null;    // decoded pattern bytes
+    let lastKit     = null;    // decoded kit bytes
+    let plockValues = null;    // plockValues[track] = Map<plockType, Uint8Array[64]>
     let stepPage    = 0;
+    let openPanel   = null;    // { t, s, el }
 
     // ─── UI refs ──────────────────────────────────────────────────────────────
 
@@ -406,7 +599,6 @@
       midiAccess.onstatechange = () => {
         const hadRytm = !!(rytmInput && rytmOutput);
         findPorts();
-        // Auto-request when Analog Rytm appears (e.g. USB plug-in after load)
         if (!hadRytm && rytmInput && rytmOutput) requestPattern();
       };
       findPorts();
@@ -425,15 +617,11 @@
 
       for (const [, p] of midiAccess.inputs) {
         inNames.push(p.name);
-        if (p.name.toLowerCase().includes('rytm')) {
-          rytmInput = p;
-        }
+        if (p.name.toLowerCase().includes('rytm')) rytmInput = p;
       }
       for (const [, p] of midiAccess.outputs) {
         outNames.push(p.name);
-        if (p.name.toLowerCase().includes('rytm')) {
-          rytmOutput = p;
-        }
+        if (p.name.toLowerCase().includes('rytm')) rytmOutput = p;
       }
 
       portInfoEl.textContent =
@@ -464,7 +652,6 @@
       if (lastRaw) renderGrid(lastRaw, stepPage);
     });
 
-    // Auto-connect on page load
     connectMidi();
 
     function requestPattern() {
@@ -473,10 +660,10 @@
       inSysex  = false;
       setStatus('Requesting pattern…');
       rytmOutput.send(PATTERN_REQUEST_X);
+      rytmOutput.send(KIT_REQUEST_X);
     }
 
     // ─── Receive & reassemble SysEx ───────────────────────────────────────────
-    // Web MIDI may deliver large SysEx messages in chunks, so we buffer until F7.
 
     function onMidiMessage(ev) {
       const data = ev.data;
@@ -499,24 +686,37 @@
     // ─── SysEx handler ────────────────────────────────────────────────────────
 
     function handleSysex(syx) {
-      // Validate Elektron Analog Rytm pattern dump header (10 bytes):
-      //   [F0][00][20][3C][07][devId][dumpId][verHi][verLo][objNr]
       if (syx.length < 20) return;
-      if (syx[0] !== 0xF0)           return;
-      if (syx[1] !== 0x00)           return;
+      if (syx[0] !== 0xF0)              return;
+      if (syx[1] !== 0x00)              return;
       if (syx[2] !== AR_ELEKTRON_MFR_1) return;
       if (syx[3] !== AR_ELEKTRON_MFR_2) return;
       if (syx[4] !== AR_PRODUCT_ID)     return;
 
       const dumpId = syx[6];
-      const isPattern =
-        dumpId === AR_SYSEX_DUMP_ID_PATTERN ||   // 0x54: saved-slot dump
-        dumpId === AR_SYSEX_DUMPX_ID_PATTERN;    // 0x5A: workbuffer dump
 
+      // ── Kit dump ──────────────────────────────────────────────────────────
+      if (dumpId === AR_SYSEX_DUMPX_ID_KIT) {
+        let raw;
+        try { raw = decodeSysex7to8(syx); } catch (e) { return; }
+        lastKit = raw;
+        // Re-render open panel if any to update kit defaults
+        if (openPanel) {
+          const { t, s } = openPanel;
+          openPanel.el.replaceWith(buildStepPanel(t, s));
+          openPanel.el = gridEl.querySelector('.step-panel');
+        }
+        return;
+      }
+
+      // ── Pattern dump ─────────────────────────────────────────────────────
+      const isPattern =
+        dumpId === AR_SYSEX_DUMP_ID_PATTERN ||
+        dumpId === AR_SYSEX_DUMPX_ID_PATTERN;
       if (!isPattern) return;
 
-      const objNr   = syx[9];
-      const isWB    = (dumpId === AR_SYSEX_DUMPX_ID_PATTERN);
+      const objNr  = syx[9];
+      const isWB   = (dumpId === AR_SYSEX_DUMPX_ID_PATTERN);
       const patName = isWB ? 'Workbuffer' : patternSlotName(objNr);
 
       setStatus('Decoding ' + syx.length + ' bytes…');
@@ -526,19 +726,18 @@
         raw = decodeSysex7to8(syx);
       } catch (e) {
         setStatus('Decode error: ' + e.message, 'err');
-        console.error(e);
         return;
       }
 
-      const kitNum     = raw.length > KIT_NUMBER_OFFSET     ? raw[KIT_NUMBER_OFFSET]    : 0xFF;
-      const kitStr     = (kitNum === 0xFF) ? '—' : String(kitNum + 1).padStart(2, '0');
-      const bpmRaw     = raw.length > BPM_LSB_OFFSET
+      const kitNum    = raw.length > KIT_NUMBER_OFFSET    ? raw[KIT_NUMBER_OFFSET]   : 0xFF;
+      const kitStr    = (kitNum === 0xFF) ? '—' : String(kitNum + 1).padStart(2, '0');
+      const bpmRaw    = raw.length > BPM_LSB_OFFSET
         ? (raw[BPM_MSB_OFFSET] << 8) | raw[BPM_LSB_OFFSET] : 0;
-      const bpmStr     = bpmRaw ? (bpmRaw / 120).toFixed(1) : '—';
-      const swingAmt   = raw.length > SWING_AMOUNT_OFFSET  ? raw[SWING_AMOUNT_OFFSET]  : 0;
-      const masterLen  = raw.length > MASTER_LENGTH_OFFSET + 1
+      const bpmStr    = bpmRaw ? (bpmRaw / 120).toFixed(1) : '—';
+      const swingAmt  = raw.length > SWING_AMOUNT_OFFSET  ? raw[SWING_AMOUNT_OFFSET] : 0;
+      const masterLen = raw.length > MASTER_LENGTH_OFFSET + 1
         ? raw[MASTER_LENGTH_OFFSET] | (raw[MASTER_LENGTH_OFFSET + 1] << 8) : 0;
-      const masterStr  = (masterLen === 0 || masterLen > 128) ? 'INF' : masterLen;
+      const masterStr = (masterLen === 0 || masterLen > 128) ? 'INF' : masterLen;
 
       metaEl.innerHTML =
         'Pattern: <span>' + patName + '</span> &ensp;' +
@@ -548,11 +747,11 @@
         'Master: <span>'  + masterStr + '</span>';
 
       lastRaw = raw;
+      parsePlocks(raw);
       renderGrid(raw, stepPage);
       setStatus('Ready', 'ok');
     }
 
-    // Convert bank+number (0-based) → e.g. "A01"
     function patternSlotName(n) {
       const bank = String.fromCharCode(65 + Math.floor(n / 16));
       const slot = String(1 + (n % 16)).padStart(2, '0');
@@ -560,25 +759,11 @@
     }
 
     // ─── 7-bit SysEx → 8-bit raw decode ──────────────────────────────────────
-    //
-    // Mirrors ar_sysex_decode() in sysex.c.
-    //
-    // SysEx message layout (all byte indices within syx[]):
-    //   [0..9]   : 10-byte header (F0 + 9 data bytes)
-    //   [10..-6] : encoded payload, syxDatSz bytes
-    //   [-5..-4] : checksum (2 bytes, 7-bit each)
-    //   [-3..-2] : data size (2 bytes, 7-bit each)
-    //   [-1]     : F7
-    //
-    // Every 8 payload bytes → 7 raw bytes:
-    //   byte 0 (msbs): bit6=MSB of out[0], bit5=MSB of out[1], … bit0=MSB of out[6]
-    //   bytes 1..7   : lower 7 bits of out[0..6]
 
     function decodeSysex7to8(syx) {
       const dataStart = 10;
-      const dataEnd   = syx.length - 5;  // chkHi chkLo szHi szLo F7
+      const dataEnd   = syx.length - 5;
       const syxDatSz  = dataEnd - dataStart;
-
       if (syxDatSz <= 0) throw new Error('Empty payload');
 
       const raw  = [];
@@ -588,11 +773,11 @@
       for (let i = 0; i < syxDatSz; i++) {
         const b = syx[dataStart + i];
         if (pkbNr === 0) {
-          msbs = b;             // MSB accumulator byte
+          msbs = b;
         } else {
-          raw.push(b | (msbs & 0x80));  // restore high bit
+          raw.push(b | (msbs & 0x80));
         }
-        msbs  = (msbs << 1) & 0xFF;    // shift MSB of next byte into position 7
+        msbs  = (msbs << 1) & 0xFF;
         pkbNr = (pkbNr + 1) & 7;
       }
 
@@ -600,11 +785,6 @@
     }
 
     // ─── Trig flags from packed 14-bit bitstream ──────────────────────────────
-    //
-    // Mirrors ar_pattern_track_get_trig_flags() in pattern.c.
-    //
-    // Each step's 14 trig bits are stored consecutively in a packed bit array.
-    // Bit 0 of the result = AR_TRIG_ENABLE.
 
     function getTrigFlags(trigBits, stepIdx) {
       const startBit = 14 * stepIdx;
@@ -632,66 +812,66 @@
       return r;
     }
 
-    // ─── Render grid ──────────────────────────────────────────────────────────
-    //
-    // ar_pattern_t layout (V5 / FW1.70, raw 8-bit bytes):
-    //   magic[4]      @0
-    //   tracks[13]    @4, each TRACK_V5_SZ (641) bytes
-    //     trig_bits[112] at track offset 0     (14 bits per step, 64 steps)
-    //     num_steps      at track offset 0x235 (1..64)
+    // ─── Plock parsing ────────────────────────────────────────────────────────
+    // Scans plock_seqs and populates module-level `plockValues`.
+    // Returns a plockMap[track][step] presence array for use in renderGrid.
 
-    function renderGrid(raw, page) {
-      gridEl.innerHTML = '';
+    function parsePlocks(raw) {
+      const values = Array.from({length: AR_NUM_TRACKS}, () => new Map());
+      const map    = Array.from({length: AR_NUM_TRACKS}, () => new Uint8Array(AR_NUM_STEPS));
 
-      const GROUPS    = 2;
-      const GROUP_SZ  = 16;
-      const STEP_W    = 32;   // matches --step-size
-      const STEP_GAP  = 2;    // matches --step-gap
-      const GROUP_GAP = 8;    // matches --group-gap
-      const stepOffset = page * 32;
-
-      // Swing amount: 0 = 50% (no swing), 1–30 = 51–80%.
-      const swingAmount = (raw.length > SWING_AMOUNT_OFFSET) ? raw[SWING_AMOUNT_OFFSET] : 0;
-
-      // ── Scan plock_seqs to build a per-track, per-step plock presence map ──
-      // This is the authoritative source: the _SW trig-flag bits are set by
-      // default_trig_flags on every triggered step, so they cannot be used for
-      // plock detection. We scan the actual plock_seqs instead.
-      //
-      // plockMap[track][step] = 1  when any active plock_seq for that track has
-      // data[step] != 0xFF (0xFF = "no lock for this step", same convention as
-      // notes / velocities / note_lengths).
-      const plockMap = Array.from({length: AR_NUM_TRACKS}, () => new Uint8Array(AR_NUM_STEPS));
-      const plockSeqsEnd = PLOCK_SEQS_BASE + NUM_PLOCK_SEQS * PLOCK_SEQ_SZ;
-      if (raw.length >= plockSeqsEnd) {
+      const end = PLOCK_SEQS_BASE + NUM_PLOCK_SEQS * PLOCK_SEQ_SZ;
+      if (raw.length >= end) {
         for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
           const base   = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
           const plType = raw[base];
           const trkNr  = raw[base + 1];
           if (plType === 0xFF || trkNr === 0xFF || trkNr >= AR_NUM_TRACKS) continue;
+
+          let arr = values[trkNr].get(plType);
+          if (!arr) { arr = new Uint8Array(AR_NUM_STEPS).fill(0xFF); values[trkNr].set(plType, arr); }
+
           for (let s = 0; s < AR_NUM_STEPS; s++) {
-            if (raw[base + 2 + s] !== 0xFF) plockMap[trkNr][s] = 1;
+            const v = raw[base + 2 + s];
+            if (v !== 0xFF) { arr[s] = v; map[trkNr][s] = 1; }
           }
         }
       }
 
-      // ── X-centre of step pageIdx (0-31) inside the track-steps container ──
-      // groupWidth = 16*32 + 15*2 = 542 px
+      plockValues = values;
+      return map;
+    }
+
+    // ─── Render grid ──────────────────────────────────────────────────────────
+
+    function renderGrid(raw, page) {
+      closeStepPanel();
+      gridEl.innerHTML = '';
+
+      const GROUPS    = 2;
+      const GROUP_SZ  = 16;
+      const STEP_W    = 32;
+      const STEP_GAP  = 2;
+      const GROUP_GAP = 8;
+      const stepOffset = page * 32;
+
+      const swingAmount = (raw.length > SWING_AMOUNT_OFFSET) ? raw[SWING_AMOUNT_OFFSET] : 0;
+
+      const plockMap = parsePlocks(raw);
+
       function stepCenterX(pageIdx) {
         const g = Math.floor(pageIdx / GROUP_SZ);
         const s = pageIdx % GROUP_SZ;
-        const groupWidth = GROUP_SZ * STEP_W + (GROUP_SZ - 1) * STEP_GAP;
-        return g * (groupWidth + GROUP_GAP) + s * (STEP_W + STEP_GAP) + STEP_W / 2;
+        const gw = GROUP_SZ * STEP_W + (GROUP_SZ - 1) * STEP_GAP;
+        return g * (gw + GROUP_GAP) + s * (STEP_W + STEP_GAP) + STEP_W / 2;
       }
 
-      // ── Ruler (step numbers) ──────────────────────────────────────────────
+      // ── Ruler ─────────────────────────────────────────────────────────────
       const ruler = document.createElement('div');
       ruler.className = 'ruler-row';
-
       const rulerSpace = document.createElement('div');
       rulerSpace.className = 'track-label-space';
       ruler.appendChild(rulerSpace);
-
       const rulerGroups = document.createElement('div');
       rulerGroups.className = 'ruler-groups';
       for (let g = 0; g < GROUPS; g++) {
@@ -711,14 +891,15 @@
 
       // ── Track rows ────────────────────────────────────────────────────────
       for (let t = 0; t < AR_NUM_TRACKS; t++) {
-        const trackBase  = 4 + t * TRACK_V5_SZ;
-        const trigBits   = raw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
-        const numSteps   = raw[trackBase + NUM_STEPS_OFFSET];
-        const speedByte  = raw[trackBase + TRACK_SPEED_OFFSET];
-        const speedStr   = TRACK_SPEED_LABELS[speedByte & 0x07] || '1x';
+        const trackBase = 4 + t * TRACK_V5_SZ;
+        const trigBits  = raw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
+        const numSteps  = raw[trackBase + NUM_STEPS_OFFSET];
+        const speedByte = raw[trackBase + TRACK_SPEED_OFFSET];
+        const speedStr  = TRACK_SPEED_LABELS[speedByte & 0x07] || '1x';
 
         const row = document.createElement('div');
         row.className = 'track-row';
+        row.dataset.track = t;
 
         // ── Label ──
         const label = document.createElement('div');
@@ -732,16 +913,14 @@
         label.appendChild(metaSpan);
         row.appendChild(label);
 
-        // ── Steps outer (provides positioning context for slide lines) ──
+        // ── Steps outer ──
         const stepsOuter = document.createElement('div');
         stepsOuter.className = 'steps-outer';
-
         const stepsWrap = document.createElement('div');
         stepsWrap.className = 'track-steps';
 
-        // Per-page arrays to collect info for slide line rendering
-        const slideSteps  = new Array(32).fill(false); // step has SLIDE trig
-        const activeSteps = new Array(32).fill(false); // step is a trig or lock-trig
+        const slideSteps  = new Array(32).fill(false);
+        const activeSteps = new Array(32).fill(false);
 
         for (let g = 0; g < GROUPS; g++) {
           const grp = document.createElement('div');
@@ -758,25 +937,15 @@
             const hasSwing = (flags & AR_TRIG_SWING)  !== 0;
             const isSlide  = (flags & AR_TRIG_SLIDE)  !== 0;
             const beyond   = stepIdx >= numSteps;
-            // Plock detection via plock_seqs (not trig flags — see note above).
             const hasPlock = !beyond && plockMap[t][stepIdx] !== 0;
 
-            // Lock trig detection.
-            // On the AR, lock trigs are stored with AR_TRIG_ENABLE=1 (isOn=true), but
-            // the _SW state bits (0x0780) are NOT set — those are only set by
-            // default_trig_flags on regular triggered steps. The _EN bits (0x3840) ARE
-            // set when any parameter is locked. So the distinguishing signature is:
-            //   regular trig : isOn=true,  swBits ≠ 0 (always, even without user plocks)
-            //   lock trig    : isOn=true,  swBits = 0, enBits ≠ 0
-            // We also handle the edge case where TRIG_ENABLE=0 with plock data.
-            const enBits     = flags & 0x3840; // LFO+SYN+SMP+ENV PL_EN
-            const swBits     = flags & 0x0780; // SYN+SMP+ENV+LFO PL_SW
+            const enBits     = flags & 0x3840;
+            const swBits     = flags & 0x0780;
             const isLockTrig = !beyond && (
               (!isOn && hasPlock) ||
               (isOn && swBits === 0 && enBits !== 0)
             );
 
-            // Collect info for slide lines (only within active track length)
             if (!beyond) {
               if (isOn || isLockTrig) activeSteps[pageIdx] = true;
               if (isOn && isSlide)    slideSteps[pageIdx]  = true;
@@ -786,7 +955,6 @@
             let cls = 'step';
 
             if (isLockTrig) {
-              // Lock trig: plock without sound — shown yellow on AR hardware
               cls += ' lock-trig';
             } else if (isOn) {
               cls += ' on';
@@ -794,11 +962,10 @@
               if (isMute)              cls += ' mute';
               if (hasPlock)            cls += ' has-plock';
             }
-
             if (beyond) cls += ' inactive';
             cell.className = cls;
+            cell.dataset.step = stepIdx;
 
-            // Modifier dots (only on triggered steps)
             if (isOn) {
               if (isRetrig) { const d = document.createElement('div'); d.className = 'trig-dot retrig'; cell.appendChild(d); }
               if (hasSwing && swingAmount !== 0) { const d = document.createElement('div'); d.className = 'trig-dot swing'; cell.appendChild(d); }
@@ -813,9 +980,21 @@
             if (hasSwing && swingAmount !== 0) modParts.push('SWING');
             if (isSlide)  modParts.push('SLIDE');
             cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
-              + (isLockTrig      ? ' · LOCK' : isOn ? ' · TRIG' : '')
+              + (isLockTrig ? ' · LOCK' : isOn ? ' · TRIG' : '')
               + (modParts.length ? ' [' + modParts.join(', ') + ']' : '')
-              + (beyond          ? ' · beyond' : '');
+              + (beyond ? ' · beyond' : '')
+              + '\n⌘+click to inspect';
+
+            // Cmd+click → open step inspector panel
+            cell.addEventListener('click', (e) => {
+              if (!e.metaKey && !e.ctrlKey) return;
+              e.preventDefault();
+              if (openPanel && openPanel.t === t && openPanel.s === stepIdx) {
+                closeStepPanel();
+              } else {
+                openStepPanel(t, stepIdx);
+              }
+            });
 
             grp.appendChild(cell);
           }
@@ -825,8 +1004,6 @@
         stepsOuter.appendChild(stepsWrap);
 
         // ── Slide lines ───────────────────────────────────────────────────
-        // For each step that has a SLIDE trig, draw a horizontal line from
-        // its centre to the centre of the next trig or lock-trig on the page.
         for (let i = 0; i < 32; i++) {
           if (!slideSteps[i]) continue;
           for (let j = i + 1; j < 32; j++) {
@@ -847,6 +1024,227 @@
         gridEl.appendChild(row);
       }
     }
+
+    // ─── Step inspector panel ─────────────────────────────────────────────────
+
+    function openStepPanel(t, s) {
+      closeStepPanel();
+
+      const trackRow = gridEl.querySelector(`.track-row[data-track="${t}"]`);
+      if (!trackRow) return;
+
+      const panel = buildStepPanel(t, s);
+      gridEl.insertBefore(panel, trackRow);
+      openPanel = { t, s, el: panel };
+
+      // Highlight the inspected step cell
+      const stepEl = trackRow.querySelector(`.step[data-step="${s}"]`);
+      if (stepEl) stepEl.classList.add('inspected');
+    }
+
+    function closeStepPanel() {
+      if (!openPanel) return;
+      // Remove highlight
+      const trackRow = gridEl.querySelector(`.track-row[data-track="${openPanel.t}"]`);
+      if (trackRow) {
+        const stepEl = trackRow.querySelector(`.step[data-step="${openPanel.s}"]`);
+        if (stepEl) stepEl.classList.remove('inspected');
+      }
+      openPanel.el.remove();
+      openPanel = null;
+    }
+
+    function buildStepPanel(t, s) {
+      const trackBase = 4 + t * TRACK_V5_SZ;
+      const trigBits  = lastRaw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
+      const flags     = getTrigFlags(trigBits, s);
+      const isOn      = (flags & AR_TRIG_ENABLE) !== 0;
+      const enBits    = flags & 0x3840;
+      const swBits    = flags & 0x0780;
+      const numSteps  = lastRaw[trackBase + NUM_STEPS_OFFSET];
+      const beyond    = s >= numSteps;
+      const hasPlock  = plockValues && plockValues[t].size > 0 &&
+        [...plockValues[t].values()].some(arr => arr[s] !== 0xFF);
+      const isLockTrig = !beyond && (
+        (!isOn && hasPlock) || (isOn && swBits === 0 && enBits !== 0)
+      );
+      const trigType = beyond ? 'BEYOND' : isLockTrig ? 'LOCK TRIG' : isOn ? 'TRIG' : 'EMPTY';
+
+      const panel = document.createElement('div');
+      panel.className = 'step-panel';
+
+      // Header
+      const hdr = document.createElement('div');
+      hdr.className = 'sp-header';
+      const title = document.createElement('span');
+      title.textContent = TRACK_NAMES[t] + ' · Step ' + (s + 1) + ' · ' + trigType;
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'sp-close';
+      closeBtn.textContent = '×';
+      closeBtn.addEventListener('click', closeStepPanel);
+      hdr.appendChild(title);
+      hdr.appendChild(closeBtn);
+      panel.appendChild(hdr);
+
+      // Sections row
+      const secs = document.createElement('div');
+      secs.className = 'sp-sections';
+
+      secs.appendChild(buildFlagsSection(flags));
+      secs.appendChild(buildTrigSection(t, s, flags));
+      for (const secKey of SECTION_KEYS) {
+        secs.appendChild(buildParamSection(secKey, t, s));
+      }
+
+      panel.appendChild(secs);
+      return panel;
+    }
+
+    // FLAGS section: ACC / MUT / SWG / SLD
+    function buildFlagsSection(flags) {
+      const flagDefs = [
+        { lbl: 'ACC', on: (flags & AR_TRIG_ACCENT) !== 0 },
+        { lbl: 'MUT', on: (flags & AR_TRIG_MUTE)   !== 0 },
+        { lbl: 'SWG', on: (flags & AR_TRIG_SWING)  !== 0 },
+        { lbl: 'SLD', on: (flags & AR_TRIG_SLIDE)  !== 0 },
+      ];
+      const body = document.createElement('div');
+      body.className = 'sp-flags';
+      for (const f of flagDefs) {
+        const el = document.createElement('div');
+        el.className = 'sp-flag' + (f.on ? ' on' : '');
+        el.textContent = f.lbl;
+        body.appendChild(el);
+      }
+      return makeSec('FLAGS', body);
+    }
+
+    // TRIG section: NOTE, VELO, LEN, PROB, then SYN/SMP/ENV/LFO
+    function buildTrigSection(t, s, flags) {
+      const trackBase = 4 + t * TRACK_V5_SZ;
+
+      const noteRaw  = lastRaw[trackBase + NOTE_OFFSET + s];
+      const defNote  = lastRaw[trackBase + DEFAULT_NOTE_OFFSET];
+      const noteLocked = (noteRaw !== 0xFF && noteRaw !== 0x7F);
+      const noteVal  = noteLocked ? midiNoteToName(noteRaw & 0x7F) : midiNoteToName(defNote);
+
+      const veloRaw  = lastRaw[trackBase + VELOCITY_OFFSET + s];
+      const defVelo  = lastRaw[trackBase + DEFAULT_VELOCITY_OFFSET];
+      const veloLocked = veloRaw !== 0xFF;
+      const veloVal  = veloLocked ? veloRaw : defVelo;
+
+      const lenRaw   = lastRaw[trackBase + NOTE_LEN_OFFSET + s];
+      const defLen   = lastRaw[trackBase + DEFAULT_NOTE_LEN_OFFSET];
+      const lenLocked = lenRaw !== 0xFF;
+      const lenVal   = noteLenStr(lenLocked ? lenRaw : defLen);
+
+      const prob     = lastRaw[trackBase + TRIG_PROBABILITY_OFFSET];
+
+      const body = document.createElement('div');
+      body.className = 'sp-params';
+      body.appendChild(makeParamRow('NOTE', noteVal,          noteLocked));
+      body.appendChild(makeParamRow('VELO', veloVal,          veloLocked));
+      body.appendChild(makeParamRow('LEN',  lenVal,           lenLocked));
+      body.appendChild(makeParamRow('PROB', prob + '%',       false));
+
+      // SYN / SMP / ENV / LFO retrigger switches
+      const swDefs = [
+        { lbl: 'SYN', bit: AR_TRIG_SYN_PL_SW },
+        { lbl: 'SMP', bit: AR_TRIG_SMP_PL_SW },
+        { lbl: 'ENV', bit: AR_TRIG_ENV_PL_SW },
+        { lbl: 'LFO', bit: AR_TRIG_LFO_PL_SW },
+      ];
+      const swRow = document.createElement('div');
+      swRow.className = 'sp-sw-row';
+      for (const sw of swDefs) {
+        const on = (flags & sw.bit) !== 0;
+        const el = document.createElement('div');
+        // OFF is the deviation from default (default_trig_flags sets all SW bits ON)
+        el.className = 'sp-flag' + (on ? ' on' : '');
+        el.textContent = sw.lbl;
+        swRow.appendChild(el);
+      }
+      body.appendChild(swRow);
+
+      return makeSec('TRIG', body);
+    }
+
+    // SRC / SMPL / FLTR / AMP / LFO sections
+    function buildParamSection(secKey, t, s) {
+      const body = document.createElement('div');
+      body.className = 'sp-params';
+
+      for (const [ptStr, info] of Object.entries(PLOCK_INFO)) {
+        if (info.sec !== secKey) continue;
+        const pt = Number(ptStr);
+
+        const kitDef = getKitDefault(t, info.sndOff);
+        const plArr  = plockValues && plockValues[t].get(pt);
+        const plVal  = plArr ? plArr[s] : 0xFF;
+        const locked = plVal !== 0xFF;
+
+        const displayVal = locked ? plVal : (kitDef !== null ? kitDef : '?');
+        body.appendChild(makeParamRow(info.lbl, displayVal, locked));
+      }
+
+      return makeSec(secKey, body);
+    }
+
+    // ─── Panel helpers ────────────────────────────────────────────────────────
+
+    function makeSec(title, bodyEl) {
+      const sec = document.createElement('div');
+      sec.className = 'sp-sec';
+      const head = document.createElement('div');
+      head.className = 'sp-sec-head';
+      head.textContent = title;
+      sec.appendChild(head);
+      sec.appendChild(bodyEl);
+      return sec;
+    }
+
+    function makeParamRow(lbl, val, locked) {
+      const row = document.createElement('div');
+      row.className = 'sp-param';
+      const l = document.createElement('span');
+      l.className = 'sp-lbl';
+      l.textContent = lbl;
+      const v = document.createElement('span');
+      v.className = 'sp-val' + (locked ? ' locked' : '');
+      v.textContent = val;
+      row.appendChild(l);
+      row.appendChild(v);
+      return row;
+    }
+
+    // ─── Kit default lookup ───────────────────────────────────────────────────
+    // Returns the default value byte for a plock-able parameter from the decoded
+    // kit. soundOff is the offset within ar_sound_t; for s_u16_t fields the hi
+    // byte (first in memory, lower address) carries the 0-127 value.
+
+    function getKitDefault(trackIdx, soundOff) {
+      if (!lastKit || trackIdx >= 12) return null;  // FX track has no ar_sound_t
+      const base = KIT_TRACKS_BASE + trackIdx * AR_SOUND_V5_SZ;
+      if (base + soundOff >= lastKit.length) return null;
+      return lastKit[base + soundOff];
+    }
+
+    // ─── Display helpers ──────────────────────────────────────────────────────
+
+    // MIDI note → name using Elektron convention: note 60 = C5
+    function midiNoteToName(n) {
+      if (n > 127) return '?';
+      const NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+      return NAMES[n % 12] + Math.floor(n / 12);
+    }
+
+    // Note length encoding: 0xFF = unset (use default), values 0-127
+    function noteLenStr(v) {
+      if (v === 0xFF) return 'DEF';
+      if (v === 0x7F) return '\u221E';  // ∞
+      return String(v);
+    }
+
   </script>
 </body>
 </html>
