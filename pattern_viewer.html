@@ -472,7 +472,9 @@
     const NOTE_OFFSET                = 0x0070;  // notes[64]       @0x0074
     const VELOCITY_OFFSET            = 0x00B0;  // velocities[64]  @0x00B4
     const NOTE_LEN_OFFSET            = 0x00F0;  // note_lengths[64]@0x00F4
-    const MICRO_TIMING_OFFSET        = 0x0130;  // micro_timings[64]@0x0134
+    const MICRO_TIMING_OFFSET        = 0x0130;  // micro_timings[64]  @0x0134
+    const RETRIG_LENGTH_OFFSET       = 0x0170;  // retrig_lengths[64] @0x0174
+    const RETRIG_RATE_OFFSET         = 0x01B0;  // retrig_rates[64]   @0x01B4
     const DEFAULT_NOTE_OFFSET        = 0x0230;  // default_note    @0x0234
     const DEFAULT_VELOCITY_OFFSET    = 0x0231;  // default_velocity@0x0235
     const DEFAULT_NOTE_LEN_OFFSET    = 0x0232;  // default_note_len@0x0236
@@ -566,6 +568,16 @@
     };
 
     const SECTION_KEYS = ['SRC','SMPL','FLTR','AMP','LFO'];
+
+    // Trig condition names (indexed by AR_TRIG_CONDITION_* enum, 0-56)
+    const TRIG_COND_NAMES = [
+      '1%','3%','4%','6%','9%','13%','19%','25%','33%','41%',
+      '50%','59%','67%','75%','81%','87%','91%','94%','96%','98%',
+      '99%','100%','FILL','!FILL','PRE','!PRE','NEI','!NEI',
+      '1ST','!1ST','1:2','2:2','1:3','2:3','3:3','1:4','2:4','3:4','4:4',
+      '1:5','2:5','3:5','4:5','5:5','1:6','2:6','3:6','4:6','5:6','6:6',
+      '1:7','2:7','3:7','4:7','5:7','6:7','7:7',
+    ];
 
     // ─── State ────────────────────────────────────────────────────────────────
 
@@ -949,7 +961,19 @@
             const hasSwing = (flags & AR_TRIG_SWING)  !== 0;
             const isSlide  = (flags & AR_TRIG_SLIDE)  !== 0;
             const beyond   = stepIdx >= numSteps;
-            const hasPlock = !beyond && plockMap[t][stepIdx] !== 0;
+            // Per-step locks stored in track arrays (not plock_seqs)
+            const noteRaw    = lastRaw[trackBase + NOTE_OFFSET     + stepIdx];
+            const veloRaw    = lastRaw[trackBase + VELOCITY_OFFSET + stepIdx];
+            const lenRaw     = lastRaw[trackBase + NOTE_LEN_OFFSET + stepIdx];
+            // notes bit 7: 1=no condition, 0=has condition (independent of note lock)
+            const hasTrigCond  = !beyond && (noteRaw & 0x80) === 0;
+            const noteLocked   = !beyond && (noteRaw & 0x7F) !== 0x7F;
+            const veloLocked   = !beyond && veloRaw !== 0xFF;
+            const lenLocked    = !beyond && lenRaw  !== 0xFF;
+            const hasPlock = !beyond && (
+              plockMap[t][stepIdx] !== 0 ||
+              noteLocked || veloLocked || lenLocked || hasTrigCond
+            );
             const sndLock  = lastRaw[trackBase + SOUND_LOCK_OFFSET + stepIdx];
             const hasSoundLock = !beyond && sndLock !== 0xFF;
 
@@ -1136,6 +1160,25 @@
     }
 
     // TRIG section: NOTE, VELO, LEN, PROB, then SYN/SMP/ENV/LFO
+    // Returns the trig condition index (0–56, see TRIG_COND_NAMES) if a per-step
+    // trig condition is set, or null if the step plays unconditionally.
+    // Condition bits are packed across notes/micro_timings/retrig_lengths/retrig_rates
+    // (see ar_pattern_track_get_step_trig_condition in pattern.c).
+    // When notes[s] bit 7 = 1 → no condition; bit 7 = 0 → has condition.
+    function getTrigCondition(trackBase, s) {
+      const noteRaw = lastRaw[trackBase + NOTE_OFFSET + s];
+      if ((noteRaw & 0x80) !== 0) return null; // bit 7 = 1 → no condition
+      const microRaw  = lastRaw[trackBase + MICRO_TIMING_OFFSET + s];
+      const retLenRaw = lastRaw[trackBase + RETRIG_LENGTH_OFFSET + s];
+      const retRatRaw = lastRaw[trackBase + RETRIG_RATE_OFFSET + s];
+      let r = 0;
+      r  = (noteRaw   & 0x80) >> 1;  // bit 6  (always 0 for valid conditions 0-56)
+      r |= (microRaw  & 0xC0) >> 2;  // bits 5..4
+      r |= (retLenRaw & 0x80) >> 4;  // bit 3
+      r |= (retRatRaw & 0xE0) >> 5;  // bits 2..0
+      return r;
+    }
+
     function buildTrigSection(t, s, flags) {
       const trackBase = 4 + t * TRACK_V5_SZ;
 
@@ -1156,6 +1199,13 @@
 
       const prob     = lastRaw[trackBase + TRIG_PROBABILITY_OFFSET];
 
+      // Per-step trig condition overrides the track-level probability
+      const trigCond   = getTrigCondition(trackBase, s);
+      const probStr    = trigCond !== null
+        ? (TRIG_COND_NAMES[trigCond] ?? String(trigCond))
+        : (prob + '%');
+      const probLocked = trigCond !== null;
+
       const sndLock  = lastRaw[trackBase + SOUND_LOCK_OFFSET + s];
       const hasSnd   = sndLock !== 0xFF;
 
@@ -1165,7 +1215,7 @@
       body.appendChild(makeParamRow('NOTE', noteVal,                   noteLocked));
       body.appendChild(makeParamRow('VELO', veloVal,                   veloLocked));
       body.appendChild(makeParamRow('LEN',  lenVal,                    lenLocked));
-      body.appendChild(makeParamRow('PROB', prob + '%',                false));
+      body.appendChild(makeParamRow('PROB', probStr,                   probLocked));
 
       // SYN / SMP / ENV / LFO retrigger switches
       const swDefs = [
