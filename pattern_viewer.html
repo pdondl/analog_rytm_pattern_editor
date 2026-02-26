@@ -216,12 +216,12 @@
       width: 0; height: 0;
       pointer-events: none;
     }
-    .utime-arrow.late  { border-top: 4px solid transparent;
-                         border-bottom: 4px solid transparent;
-                         border-left:  6px solid rgba(255,220,100,0.85); }
-    .utime-arrow.early { border-top: 4px solid transparent;
-                         border-bottom: 4px solid transparent;
-                         border-right: 6px solid rgba(255,220,100,0.85); }
+    .utime-arrow.late  { border-top: 5px solid transparent;
+                         border-bottom: 5px solid transparent;
+                         border-left:  7px solid rgba(255,255,255,0.9); }
+    .utime-arrow.early { border-top: 5px solid transparent;
+                         border-bottom: 5px solid transparent;
+                         border-right: 7px solid rgba(255,255,255,0.9); }
 
     /* Lock trig: parameter lock present, but no sound trigger */
     .step.lock-trig {
@@ -244,13 +244,14 @@
     .step.has-plock:not(.has-sound-lock)::before {
       border-color: #cc44aa transparent transparent transparent; /* purple when no snd-lock */
     }
-    /* Both active: plock stripe extends from the sound-lock triangle */
+    /* Both active: purple diagonal stripe extending the sound-lock triangle's hypotenuse */
     .step.has-plock.has-sound-lock::after {
       content: '';
       position: absolute;
-      top: 0; left: 10px;
-      width: 5px; height: 3px;
+      top: 0; left: 0;
+      width: 20px; height: 20px;
       background: #cc44aa;
+      clip-path: polygon(10px 0, 18px 0, 0 18px, 0 10px);
     }
     /* Beat groups — 4-step sub-groups within each 16-step group */
     .beat-group {
@@ -266,12 +267,12 @@
       position: absolute;
       bottom: 0; left: 0;
       height: 2px;
-      background: rgba(255, 255, 255, 0.28);
+      background: rgba(0, 0, 0, 0.38);  /* dark — readable on orange/amber trigs */
       pointer-events: none;
     }
     .note-len-bar.inf {
       width: 100%;
-      background: rgba(255, 255, 255, 0.12);
+      background: rgba(0, 0, 0, 0.18);
     }
     /* Inspected step: ring around the cell */
     .step.inspected {
@@ -1075,8 +1076,8 @@
               arr.className = 'utime-arrow ' + (microSigned > 0 ? 'late' : 'early');
               cell.appendChild(arr);
             }
-            // Note length bar — width proportional to note length (0-126 linear, 127=∞)
-            if ((isOn || isLockTrig) && !beyond) {
+            // Note length bar — only on triggered steps (lock-trigs don't sound)
+            if (isOn && !beyond) {
               const defLen = lastRaw[trackBase + DEFAULT_NOTE_LEN_OFFSET];
               const lenDisp = lenRaw !== 0xFF ? lenRaw : defLen;
               if (lenDisp === 0x7F) {
