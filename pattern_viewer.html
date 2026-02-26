@@ -200,8 +200,28 @@
       border-radius: 50%;
       pointer-events: none;
     }
-    .trig-dot.retrig { top:    2px; right: 2px; background: #ddcc22; }
-    .trig-dot.swing  { bottom: 2px; left:  2px; background: #4499ff; }
+    /* Retrig — top-right; dark ring keeps it visible on bright accent steps */
+    .trig-dot.retrig { top:  2px; right: 2px; background: #ddcc22;
+                       box-shadow: 0 0 0 1px rgba(0,0,0,0.45); }
+    /* Swing — stacked just below retrig in top-right */
+    .trig-dot.swing  { top: 12px; right: 2px; background: #4499ff;
+                       box-shadow: 0 0 0 1px rgba(0,0,0,0.35); }
+
+    /* UTIME arrow — bottom-centre of step, points right (late) or left (early) */
+    .utime-arrow {
+      position: absolute;
+      bottom: 3px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0; height: 0;
+      pointer-events: none;
+    }
+    .utime-arrow.late  { border-top: 4px solid transparent;
+                         border-bottom: 4px solid transparent;
+                         border-left:  6px solid rgba(255,220,100,0.85); }
+    .utime-arrow.early { border-top: 4px solid transparent;
+                         border-bottom: 4px solid transparent;
+                         border-right: 6px solid rgba(255,220,100,0.85); }
 
     /* Lock trig: parameter lock present, but no sound trigger */
     .step.lock-trig {
@@ -209,25 +229,28 @@
       border-color: #2a6080;
       box-shadow: 0 0 3px rgba(42, 96, 128, 0.35);
     }
-    /* Plock triangle indicator — top-left corner of triggered step boxes */
-    .step.has-plock::before {
+    /* Upper-left corner indicators — sound-lock (cyan) takes the triangle;
+       plock (purple) takes the triangle when no sound-lock, or a stripe when both. */
+    .step.has-sound-lock::before,
+    .step.has-plock:not(.has-sound-lock)::before {
       content: '';
       position: absolute;
       top: 0; left: 0;
       width: 0; height: 0;
       border-style: solid;
-      border-width: 7px 7px 0 0;
-      border-color: #cc44aa transparent transparent transparent;
+      border-width: 10px 10px 0 0;
+      border-color: #44ccdd transparent transparent transparent; /* cyan default */
     }
-    /* Sound lock triangle — bottom-right corner */
-    .step.has-sound-lock::after {
+    .step.has-plock:not(.has-sound-lock)::before {
+      border-color: #cc44aa transparent transparent transparent; /* purple when no snd-lock */
+    }
+    /* Both active: plock stripe extends from the sound-lock triangle */
+    .step.has-plock.has-sound-lock::after {
       content: '';
       position: absolute;
-      bottom: 0; right: 0;
-      width: 0; height: 0;
-      border-style: solid;
-      border-width: 0 0 7px 7px;
-      border-color: transparent transparent #44ccdd transparent;
+      top: 0; left: 10px;
+      width: 5px; height: 3px;
+      background: #cc44aa;
     }
     /* Inspected step: ring around the cell */
     .step.inspected {
@@ -428,11 +451,11 @@
       <span style="color:#ffbb44">&#9632;</span>&thinsp;accent &ensp;
       <span style="color:#606060">&#9632;</span>&thinsp;mute &ensp;
       <span style="color:#2a6080">&#9632;</span>&thinsp;lock trig (plock, no sound) &mdash;
-    <span style="color:#cc44aa">&#9699;</span>&thinsp;plock (top-left triangle) &ensp;
-      <span style="color:#44ccdd">&#9699;</span>&thinsp;sound lock (bottom-right triangle) &mdash;
-    Dots:
-      <span style="color:#ddcc22">&#9679;</span>&thinsp;retrig &ensp;
-      <span style="color:#4499ff">&#9679;</span>&thinsp;swing (hidden when pattern swing = 50%).<br>
+    <span style="color:#44ccdd">&#9699;</span>&thinsp;sound lock (top-left triangle) &ensp;
+      <span style="color:#cc44aa">&#9699;</span>&thinsp;plock — triangle when no sound lock, purple stripe alongside when both &mdash;
+    Dots: <span style="color:#ddcc22">&#9679;</span>&thinsp;retrig (top-right) &ensp;
+      <span style="color:#4499ff">&#9679;</span>&thinsp;swing below retrig (hidden when pattern swing = 50%) &mdash;
+    <span style="color:rgba(255,220,100,0.85)">&#9654;</span>/<span style="color:rgba(255,220,100,0.85)">&#9664;</span>&thinsp;micro-timing arrow (bottom-centre, right=late/left=early).<br>
     Slide: <span style="color:#44cc77">&#9644;</span>&thinsp;green line below row, from slide step to next trig&thinsp;/&thinsp;lock (same page only).<br>
     <kbd style="color:#888">&#8984;+click</kbd> any step to inspect parameter locks. FW 1.70 binary format (compatible with 1.72).
   </div>
@@ -1019,6 +1042,11 @@
               if (isRetrig) { const d = document.createElement('div'); d.className = 'trig-dot retrig'; cell.appendChild(d); }
               if (hasSwing && swingAmount !== 0) { const d = document.createElement('div'); d.className = 'trig-dot swing'; cell.appendChild(d); }
             }
+            if ((isOn || isLockTrig) && microSigned !== 0) {
+              const arr = document.createElement('div');
+              arr.className = 'utime-arrow ' + (microSigned > 0 ? 'late' : 'early');
+              cell.appendChild(arr);
+            }
 
             // Tooltip
             const modParts = [];
@@ -1142,7 +1170,7 @@
 
       secs.appendChild(buildFlagsSection(flags));
       secs.appendChild(buildTrigSection(t, s, flags));
-      secs.appendChild(buildRetrigSection(t, s, flags));
+      if (flags & AR_TRIG_RETRIG) secs.appendChild(buildRetrigSection(t, s, flags));
       for (const secKey of SECTION_KEYS) {
         secs.appendChild(buildParamSection(secKey, t, s));
       }
