@@ -219,6 +219,16 @@
       border-width: 7px 7px 0 0;
       border-color: #cc44aa transparent transparent transparent;
     }
+    /* Sound lock triangle — bottom-right corner */
+    .step.has-sound-lock::after {
+      content: '';
+      position: absolute;
+      bottom: 0; right: 0;
+      width: 0; height: 0;
+      border-style: solid;
+      border-width: 0 0 7px 7px;
+      border-color: transparent transparent #44ccdd transparent;
+    }
     /* Inspected step: ring around the cell */
     .step.inspected {
       box-shadow: 0 0 0 2px #cc44aa !important;
@@ -418,7 +428,8 @@
       <span style="color:#ffbb44">&#9632;</span>&thinsp;accent &ensp;
       <span style="color:#606060">&#9632;</span>&thinsp;mute &ensp;
       <span style="color:#2a6080">&#9632;</span>&thinsp;lock trig (plock, no sound) &mdash;
-    <span style="color:#cc44aa">&#9699;</span>&thinsp;plock on trig (triangle = parameter lock active) &mdash;
+    <span style="color:#cc44aa">&#9699;</span>&thinsp;plock (top-left triangle) &ensp;
+      <span style="color:#44ccdd">&#9699;</span>&thinsp;sound lock (bottom-right triangle) &mdash;
     Dots:
       <span style="color:#ddcc22">&#9679;</span>&thinsp;retrig &ensp;
       <span style="color:#4499ff">&#9679;</span>&thinsp;swing (hidden when pattern swing = 50%).<br>
@@ -457,6 +468,7 @@
 
     // Track field offsets from track start in raw decoded pattern.
     // Formula: @comment_in_pattern_h - 4 (the 4 magic bytes at pattern start).
+    const SOUND_LOCK_OFFSET          = 0x0237;  // sound_locks[64] @0x023B  0=trk sound, 1-127=pool slot, 0xFF=unset
     const NOTE_OFFSET                = 0x0070;  // notes[64]       @0x0074
     const VELOCITY_OFFSET            = 0x00B0;  // velocities[64]  @0x00B4
     const NOTE_LEN_OFFSET            = 0x00F0;  // note_lengths[64]@0x00F4
@@ -938,6 +950,8 @@
             const isSlide  = (flags & AR_TRIG_SLIDE)  !== 0;
             const beyond   = stepIdx >= numSteps;
             const hasPlock = !beyond && plockMap[t][stepIdx] !== 0;
+            const sndLock  = lastRaw[trackBase + SOUND_LOCK_OFFSET + stepIdx];
+            const hasSoundLock = !beyond && sndLock !== 0x00 && sndLock !== 0xFF;
 
             const enBits     = flags & 0x3840;
             const swBits     = flags & 0x0780;
@@ -962,6 +976,7 @@
               if (isMute)              cls += ' mute';
               if (hasPlock)            cls += ' has-plock';
             }
+            if (hasSoundLock) cls += ' has-sound-lock';
             if (beyond) cls += ' inactive';
             cell.className = cls;
             cell.dataset.step = stepIdx;
@@ -978,7 +993,8 @@
             if (isMute)   modParts.push('MUTE');
             if (isRetrig) modParts.push('RETRIG');
             if (hasSwing && swingAmount !== 0) modParts.push('SWING');
-            if (isSlide)  modParts.push('SLIDE');
+            if (isSlide)      modParts.push('SLIDE');
+            if (hasSoundLock) modParts.push('SND:' + sndLock);
             cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
               + (isLockTrig ? ' · LOCK' : isOn ? ' · TRIG' : '')
               + (modParts.length ? ' [' + modParts.join(', ') + ']' : '')
@@ -1140,12 +1156,16 @@
 
       const prob     = lastRaw[trackBase + TRIG_PROBABILITY_OFFSET];
 
+      const sndLock  = lastRaw[trackBase + SOUND_LOCK_OFFSET + s];
+      const hasSnd   = sndLock !== 0x00 && sndLock !== 0xFF;
+
       const body = document.createElement('div');
       body.className = 'sp-params';
-      body.appendChild(makeParamRow('NOTE', noteVal,          noteLocked));
-      body.appendChild(makeParamRow('VELO', veloVal,          veloLocked));
-      body.appendChild(makeParamRow('LEN',  lenVal,           lenLocked));
-      body.appendChild(makeParamRow('PROB', prob + '%',       false));
+      body.appendChild(makeParamRow('SND',  hasSnd ? sndLock : 'TRK', hasSnd));
+      body.appendChild(makeParamRow('NOTE', noteVal,                   noteLocked));
+      body.appendChild(makeParamRow('VELO', veloVal,                   veloLocked));
+      body.appendChild(makeParamRow('LEN',  lenVal,                    lenLocked));
+      body.appendChild(makeParamRow('PROB', prob + '%',                false));
 
       // SYN / SMP / ENV / LFO retrigger switches
       const swDefs = [
