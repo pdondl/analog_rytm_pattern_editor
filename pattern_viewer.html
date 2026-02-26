@@ -475,6 +475,7 @@
     const MICRO_TIMING_OFFSET        = 0x0130;  // micro_timings[64]  @0x0134
     const RETRIG_LENGTH_OFFSET       = 0x0170;  // retrig_lengths[64] @0x0174
     const RETRIG_RATE_OFFSET         = 0x01B0;  // retrig_rates[64]   @0x01B4
+    const RETRIG_VELO_OFFSET         = 0x01F0;  // retrig_velocity_offsets[64] @0x01F4
     const DEFAULT_NOTE_OFFSET        = 0x0230;  // default_note    @0x0234
     const DEFAULT_VELOCITY_OFFSET    = 0x0231;  // default_velocity@0x0235
     const DEFAULT_NOTE_LEN_OFFSET    = 0x0232;  // default_note_len@0x0236
@@ -568,6 +569,12 @@
     };
 
     const SECTION_KEYS = ['SRC','SMPL','FLTR','AMP','LFO'];
+
+    // Retrig rate labels: index 0-16, matching AR display (0=1/1, 16=1/80)
+    const RETRIG_RATE_LABELS = [
+      '1/1','1/2','1/3','1/4','1/5','1/6','1/8','1/10',
+      '1/12','1/16','1/20','1/24','1/32','1/40','1/48','1/64','1/80',
+    ];
 
     // Trig condition names (indexed by AR_TRIG_CONDITION_* enum, 0-56)
     const TRIG_COND_NAMES = [
@@ -970,9 +977,12 @@
             const noteLocked   = !beyond && (noteRaw & 0x7F) !== 0x7F;
             const veloLocked   = !beyond && veloRaw !== 0xFF;
             const lenLocked    = !beyond && lenRaw  !== 0xFF;
+            const microRaw     = lastRaw[trackBase + MICRO_TIMING_OFFSET + stepIdx];
+            const microVal     = microRaw & 0x3F;
+            const microSigned  = (microVal & 0x20) ? microVal - 64 : microVal;
             const hasPlock = !beyond && (
               plockMap[t][stepIdx] !== 0 ||
-              noteLocked || veloLocked || lenLocked || hasTrigCond
+              noteLocked || veloLocked || lenLocked || hasTrigCond || microSigned !== 0
             );
             const sndLock  = lastRaw[trackBase + SOUND_LOCK_OFFSET + stepIdx];
             const hasSoundLock = !beyond && sndLock !== 0xFF;
@@ -1132,6 +1142,7 @@
 
       secs.appendChild(buildFlagsSection(flags));
       secs.appendChild(buildTrigSection(t, s, flags));
+      secs.appendChild(buildRetrigSection(t, s, flags));
       for (const secKey of SECTION_KEYS) {
         secs.appendChild(buildParamSection(secKey, t, s));
       }
@@ -1217,6 +1228,13 @@
       body.appendChild(makeParamRow('LEN',  lenVal,                    lenLocked));
       body.appendChild(makeParamRow('PROB', probStr,                   probLocked));
 
+      // Micro-timing (-23..+23): sign-extend 6-bit value from lower bits
+      const microRaw    = lastRaw[trackBase + MICRO_TIMING_OFFSET + s];
+      const microVal    = microRaw & 0x3F;
+      const microSigned = (microVal & 0x20) ? microVal - 64 : microVal;
+      const utimeStr    = (microSigned > 0 ? '+' : '') + microSigned;
+      body.appendChild(makeParamRow('UTIME', utimeStr, microSigned !== 0));
+
       // SYN / SMP / ENV / LFO retrigger switches
       const swDefs = [
         { lbl: 'SYN', bit: AR_TRIG_SYN_PL_SW },
@@ -1237,6 +1255,28 @@
       body.appendChild(swRow);
 
       return makeSec('TRIG', body);
+    }
+
+    // RETRIG section: RATE, LEN, VEL — always shown; highlighted when retrig is active
+    function buildRetrigSection(t, s, flags) {
+      const trackBase = 4 + t * TRACK_V5_SZ;
+      const isRetrig  = (flags & AR_TRIG_RETRIG) !== 0;
+
+      const rateRaw   = lastRaw[trackBase + RETRIG_RATE_OFFSET   + s] & 0x1F;
+      const lenRaw    = lastRaw[trackBase + RETRIG_LENGTH_OFFSET  + s] & 0x7F;
+      const velRaw    = lastRaw[trackBase + RETRIG_VELO_OFFSET    + s];
+      const velSigned = velRaw > 127 ? velRaw - 256 : velRaw;
+
+      const rateStr   = RETRIG_RATE_LABELS[rateRaw] ?? String(rateRaw);
+      const lenStr    = lenRaw === 127 ? '\u221E' : String(lenRaw);
+      const velStr    = (velSigned >= 0 ? '+' : '') + velSigned;
+
+      const body = document.createElement('div');
+      body.className = 'sp-params';
+      body.appendChild(makeParamRow('RATE', rateStr, isRetrig));
+      body.appendChild(makeParamRow('LEN',  lenStr,  isRetrig));
+      body.appendChild(makeParamRow('VEL',  velStr,  isRetrig && velSigned !== 0));
+      return makeSec('RETRIG', body);
     }
 
     // SRC / SMPL / FLTR / AMP / LFO sections
