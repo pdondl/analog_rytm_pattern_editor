@@ -252,6 +252,27 @@
       width: 5px; height: 3px;
       background: #cc44aa;
     }
+    /* Beat groups — 4-step sub-groups within each 16-step group */
+    .beat-group {
+      display: flex;
+      gap: var(--step-gap);
+      border-radius: 2px;
+    }
+    .beat-group.odd {
+      background: rgba(255, 255, 255, 0.035);
+    }
+    /* Note length bar — 2 px strip along step bottom, width ∝ note length */
+    .note-len-bar {
+      position: absolute;
+      bottom: 0; left: 0;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.28);
+      pointer-events: none;
+    }
+    .note-len-bar.inf {
+      width: 100%;
+      background: rgba(255, 255, 255, 0.12);
+    }
     /* Inspected step: ring around the cell */
     .step.inspected {
       box-shadow: 0 0 0 2px #cc44aa !important;
@@ -973,6 +994,7 @@
         const stepsWrap = document.createElement('div');
         stepsWrap.className = 'track-steps';
 
+        const BEAT_SZ = 4;  // steps per beat-group
         const slideSteps  = new Array(32).fill(false);
         const activeSteps = new Array(32).fill(false);
 
@@ -980,8 +1002,12 @@
           const grp = document.createElement('div');
           grp.className = 'step-group';
 
-          for (let s = 0; s < GROUP_SZ; s++) {
-            const pageIdx  = g * GROUP_SZ + s;
+          for (let b = 0; b < GROUP_SZ / BEAT_SZ; b++) {
+            const beat = document.createElement('div');
+            beat.className = 'beat-group' + (b % 2 ? ' odd' : '');
+
+            for (let s = 0; s < BEAT_SZ; s++) {
+            const pageIdx  = g * GROUP_SZ + b * BEAT_SZ + s;
             const stepIdx  = stepOffset + pageIdx;
             const flags    = getTrigFlags(trigBits, stepIdx);
             const isOn     = (flags & AR_TRIG_ENABLE) !== 0;
@@ -1010,11 +1036,12 @@
             const sndLock  = lastRaw[trackBase + SOUND_LOCK_OFFSET + stepIdx];
             const hasSoundLock = !beyond && sndLock !== 0xFF;
 
-            const enBits     = flags & 0x3840;
-            const swBits     = flags & 0x0780;
+            // AR shows a lock-trig whenever SYN and SMP are both switched off,
+            // regardless of ENV/LFO state.
+            const synSmpOff  = (flags & (AR_TRIG_SYN_PL_SW | AR_TRIG_SMP_PL_SW)) === 0;
             const isLockTrig = !beyond && (
               (!isOn && hasPlock) ||
-              (isOn && swBits === 0 && enBits !== 0)
+              (isOn && synSmpOff)
             );
 
             if (!beyond) {
@@ -1027,6 +1054,7 @@
 
             if (isLockTrig) {
               cls += ' lock-trig';
+              if (hasPlock) cls += ' has-plock';
             } else if (isOn) {
               cls += ' on';
               if (isAccent && !isMute) cls += ' accent';
@@ -1046,6 +1074,21 @@
               const arr = document.createElement('div');
               arr.className = 'utime-arrow ' + (microSigned > 0 ? 'late' : 'early');
               cell.appendChild(arr);
+            }
+            // Note length bar — width proportional to note length (0-126 linear, 127=∞)
+            if ((isOn || isLockTrig) && !beyond) {
+              const defLen = lastRaw[trackBase + DEFAULT_NOTE_LEN_OFFSET];
+              const lenDisp = lenRaw !== 0xFF ? lenRaw : defLen;
+              if (lenDisp === 0x7F) {
+                const bar = document.createElement('div');
+                bar.className = 'note-len-bar inf';
+                cell.appendChild(bar);
+              } else if (lenDisp !== 0xFF) {
+                const bar = document.createElement('div');
+                bar.className = 'note-len-bar';
+                bar.style.width = Math.round(lenDisp / 126 * 100) + '%';
+                cell.appendChild(bar);
+              }
             }
 
             // Tooltip
@@ -1074,8 +1117,10 @@
               }
             });
 
-            grp.appendChild(cell);
-          }
+              beat.appendChild(cell);
+            } // end step loop
+            grp.appendChild(beat);
+          } // end beat loop
           stepsWrap.appendChild(grp);
         }
 
