@@ -1231,11 +1231,11 @@
 
     // ─── Display helpers ──────────────────────────────────────────────────────
 
-    // MIDI note → name using Elektron convention: note 60 = C5
+    // MIDI note → name using AR convention: note 60 = C3 (C0 = note 24)
     function midiNoteToName(n) {
       if (n > 127) return '?';
       const NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-      return NAMES[n % 12] + Math.floor(n / 12);
+      return NAMES[n % 12] + (Math.floor(n / 12) - 2);
     }
 
     // Note length encoding: 0xFF = unset (use default), values 0-127
