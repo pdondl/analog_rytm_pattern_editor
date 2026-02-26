@@ -468,7 +468,7 @@
 
     // Track field offsets from track start in raw decoded pattern.
     // Formula: @comment_in_pattern_h - 4 (the 4 magic bytes at pattern start).
-    const SOUND_LOCK_OFFSET          = 0x0237;  // sound_locks[64] @0x023B  0=trk sound, 1-127=pool slot, 0xFF=unset
+    const SOUND_LOCK_OFFSET          = 0x0237;  // sound_locks[64] @0x023B  0xFF=no lock, 0x00-0x7F=pool slot 1-128 (0-indexed)
     const NOTE_OFFSET                = 0x0070;  // notes[64]       @0x0074
     const VELOCITY_OFFSET            = 0x00B0;  // velocities[64]  @0x00B4
     const NOTE_LEN_OFFSET            = 0x00F0;  // note_lengths[64]@0x00F4
@@ -951,7 +951,7 @@
             const beyond   = stepIdx >= numSteps;
             const hasPlock = !beyond && plockMap[t][stepIdx] !== 0;
             const sndLock  = lastRaw[trackBase + SOUND_LOCK_OFFSET + stepIdx];
-            const hasSoundLock = !beyond && sndLock !== 0x00 && sndLock !== 0xFF;
+            const hasSoundLock = !beyond && sndLock !== 0xFF;
 
             const enBits     = flags & 0x3840;
             const swBits     = flags & 0x0780;
@@ -994,7 +994,7 @@
             if (isRetrig) modParts.push('RETRIG');
             if (hasSwing && swingAmount !== 0) modParts.push('SWING');
             if (isSlide)      modParts.push('SLIDE');
-            if (hasSoundLock) modParts.push('SND:' + sndLock);
+            if (hasSoundLock) modParts.push('SND:' + (sndLock + 1));
             cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
               + (isLockTrig ? ' · LOCK' : isOn ? ' · TRIG' : '')
               + (modParts.length ? ' [' + modParts.join(', ') + ']' : '')
@@ -1157,11 +1157,11 @@
       const prob     = lastRaw[trackBase + TRIG_PROBABILITY_OFFSET];
 
       const sndLock  = lastRaw[trackBase + SOUND_LOCK_OFFSET + s];
-      const hasSnd   = sndLock !== 0x00 && sndLock !== 0xFF;
+      const hasSnd   = sndLock !== 0xFF;
 
       const body = document.createElement('div');
       body.className = 'sp-params';
-      body.appendChild(makeParamRow('SND',  hasSnd ? sndLock : 'TRK', hasSnd));
+      body.appendChild(makeParamRow('SND',  hasSnd ? (sndLock + 1) : 'TRK', hasSnd));
       body.appendChild(makeParamRow('NOTE', noteVal,                   noteLocked));
       body.appendChild(makeParamRow('VELO', veloVal,                   veloLocked));
       body.appendChild(makeParamRow('LEN',  lenVal,                    lenLocked));
