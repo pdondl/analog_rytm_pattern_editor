@@ -396,6 +396,8 @@
       text-align: center;
       letter-spacing: 1px;
       min-width: 34px;
+      cursor: pointer;
+      user-select: none;
     }
     .sp-flag.on {
       color: var(--accent);
@@ -450,6 +452,9 @@
   <div class="controls">
     <button id="btn-connect">Connect MIDI</button>
     <button id="btn-refresh" disabled>Request Pattern</button>
+    <button id="btn-load-syx">Load .syx</button>
+    <button id="btn-save-syx" disabled>Save .syx</button>
+    <input type="file" id="syx-file" accept=".syx" hidden>
     <div id="status">Not connected</div>
   </div>
 
@@ -640,6 +645,7 @@
     let inSysex     = false;
     let lastRaw     = null;    // decoded pattern bytes
     let lastKit     = null;    // decoded kit bytes
+    let lastSyxMeta = null;    // { devId, dumpId, verHi, verLo, objNr }
     let plockValues = null;    // plockValues[track] = Map<plockType, Uint8Array[64]>
     let stepPage    = 0;
     let openPanel   = null;    // { t, s, el }
@@ -648,6 +654,9 @@
 
     const btnConnect  = document.getElementById('btn-connect');
     const btnRefresh  = document.getElementById('btn-refresh');
+    const btnLoadSyx  = document.getElementById('btn-load-syx');
+    const btnSaveSyx  = document.getElementById('btn-save-syx');
+    const syxFileIn   = document.getElementById('syx-file');
     const btnPage0    = document.getElementById('btn-page0');
     const btnPage1    = document.getElementById('btn-page1');
     const statusEl    = document.getElementById('status');
@@ -683,6 +692,53 @@
 
     btnConnect.addEventListener('click', connectMidi);
     btnRefresh.addEventListener('click', requestPattern);
+
+    // ─── Load / Save .syx ──────────────────────────────────────────────────
+    btnLoadSyx.addEventListener('click', () => syxFileIn.click());
+
+    syxFileIn.addEventListener('change', () => {
+      const file = syxFileIn.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const bytes = new Uint8Array(reader.result);
+        // Split into individual sysex messages (F0…F7)
+        let i = 0;
+        let count = 0;
+        while (i < bytes.length) {
+          if (bytes[i] === 0xF0) {
+            let j = i + 1;
+            while (j < bytes.length && bytes[j] !== 0xF7) j++;
+            if (j < bytes.length) {
+              handleSysex(bytes.subarray(i, j + 1));
+              count++;
+              i = j + 1;
+            } else break;
+          } else {
+            i++;
+          }
+        }
+        if (count === 0) {
+          setStatus('No valid sysex messages found in file', 'err');
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      syxFileIn.value = '';  // allow reloading same file
+    });
+
+    btnSaveSyx.addEventListener('click', () => {
+      if (!lastRaw || !lastSyxMeta) return;
+      const syx = buildSysexMessage(lastRaw, lastSyxMeta);
+      const blob = new Blob([syx], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const patInfo = metaEl.querySelector('span');
+      const name = patInfo ? patInfo.textContent.replace(/\s+/g, '_') : 'pattern';
+      a.href = url;
+      a.download = name + '.syx';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
 
     function findPorts() {
       rytmInput  = null;
@@ -823,6 +879,11 @@
         'Master: <span>'  + masterStr + '</span>';
 
       lastRaw = raw;
+      lastSyxMeta = {
+        devId: syx[5], dumpId: syx[6],
+        verHi: syx[7], verLo: syx[8], objNr: syx[9]
+      };
+      btnSaveSyx.disabled = false;
       parsePlocks(raw);
       renderGrid(raw, stepPage);
       setStatus('Ready', 'ok');
@@ -860,6 +921,78 @@
       return new Uint8Array(raw);
     }
 
+    // ─── 8-bit raw → 7-bit SysEx encode (inverse of decode) ─────────────────
+    // Ported from libanalogrytm/sysex.c ar_sysex_encode
+
+    function encodeSysex8to7(raw) {
+      const out = [];
+      let chksum = 0;
+      let pkbNr = 0;
+      let msbs = 0;
+      let msbIdx = -1;
+
+      for (let i = 0; i < raw.length; i++) {
+        const c = raw[i];
+
+        if (pkbNr === 0) {
+          msbs = (c & 0x80) >> 1;
+          msbIdx = out.length;
+          out.push(0);  // placeholder for MSB byte
+        } else {
+          msbs |= (c & 0x80) >> (1 + pkbNr);
+        }
+
+        out.push(c & 0x7F);
+        chksum += (c & 0x7F);
+        pkbNr++;
+
+        if (pkbNr === 7) {
+          chksum += msbs;
+          out[msbIdx] = msbs;
+          pkbNr = 0;
+        }
+      }
+
+      // Finish last partial packet
+      if (pkbNr > 0) {
+        out[msbIdx] = msbs;
+        chksum += msbs;
+      }
+
+      return { data: new Uint8Array(out), checksum: chksum & 0x3FFF };
+    }
+
+    // ─── Build complete sysex message from raw + metadata ────────────────────
+
+    function buildSysexMessage(raw, meta) {
+      const { data, checksum } = encodeSysex8to7(raw);
+      const chkHi = (checksum >> 7) & 0x7F;
+      const chkLo = checksum & 0x7F;
+      const dataSz = data.length + 2 + 2 + 1; // payload + chksum + datasize + F7
+      const dsHi = (dataSz >> 7) & 0x7F;
+      const dsLo = dataSz & 0x7F;
+
+      const syx = new Uint8Array(10 + data.length + 5);
+      syx[0] = 0xF0;
+      syx[1] = 0x00;
+      syx[2] = AR_ELEKTRON_MFR_1;
+      syx[3] = AR_ELEKTRON_MFR_2;
+      syx[4] = AR_PRODUCT_ID;
+      syx[5] = meta.devId;
+      syx[6] = meta.dumpId;
+      syx[7] = meta.verHi;
+      syx[8] = meta.verLo;
+      syx[9] = meta.objNr;
+      syx.set(data, 10);
+      const t = 10 + data.length;
+      syx[t]     = chkHi;
+      syx[t + 1] = chkLo;
+      syx[t + 2] = dsHi;
+      syx[t + 3] = dsLo;
+      syx[t + 4] = 0xF7;
+      return syx;
+    }
+
     // ─── Trig flags from packed 14-bit bitstream ──────────────────────────────
 
     function getTrigFlags(trigBits, stepIdx) {
@@ -886,6 +1019,33 @@
         }
       }
       return r;
+    }
+
+    function setTrigFlags(trigBits, stepIdx, val) {
+      const startBit = 14 * stepIdx;
+      const numBits  = 14;
+      let byteOff  = startBit >> 3;
+      let bitOff   = startBit - (byteOff << 3);
+      let srcShift = numBits;
+      let bitsLeft = numBits;
+
+      while (bitsLeft > 0) {
+        const bitsAvail = 8 - bitOff;
+        if (bitsLeft < bitsAvail) {
+          const shift = bitsAvail - bitsLeft;
+          const mask  = ((1 << bitsLeft) - 1) << shift;
+          srcShift -= bitsLeft;
+          trigBits[byteOff] = (trigBits[byteOff] & ~mask) | (((val >> srcShift) & ((1 << bitsLeft) - 1)) << shift);
+          bitsLeft = 0;
+        } else {
+          const mask = (1 << bitsAvail) - 1;
+          srcShift -= bitsAvail;
+          trigBits[byteOff] = (trigBits[byteOff] & ~mask) | ((val >> srcShift) & mask);
+          bitsLeft -= bitsAvail;
+          bitOff    = 0;
+          byteOff++;
+        }
+      }
     }
 
     // ─── Plock parsing ────────────────────────────────────────────────────────
@@ -1214,9 +1374,9 @@
       const secs = document.createElement('div');
       secs.className = 'sp-sections';
 
-      secs.appendChild(buildFlagsSection(flags));
+      secs.appendChild(buildFlagsSection(flags, t, s));
       secs.appendChild(buildTrigSection(t, s, flags));
-      if (flags & AR_TRIG_RETRIG) secs.appendChild(buildRetrigSection(t, s, flags));
+      secs.appendChild(buildRetrigSection(t, s, flags));
       for (const secKey of SECTION_KEYS) {
         secs.appendChild(buildParamSection(secKey, t, s));
       }
@@ -1225,23 +1385,39 @@
       return panel;
     }
 
-    // FLAGS section: ACC / MUT / SWG / SLD
-    function buildFlagsSection(flags) {
+    // FLAGS section: ACC / MUT / SWG / SLD / RTG
+    function buildFlagsSection(flags, t, s) {
       const flagDefs = [
-        { lbl: 'ACC', on: (flags & AR_TRIG_ACCENT) !== 0 },
-        { lbl: 'MUT', on: (flags & AR_TRIG_MUTE)   !== 0 },
-        { lbl: 'SWG', on: (flags & AR_TRIG_SWING)  !== 0 },
-        { lbl: 'SLD', on: (flags & AR_TRIG_SLIDE)  !== 0 },
+        { lbl: 'ACC', bit: AR_TRIG_ACCENT },
+        { lbl: 'MUT', bit: AR_TRIG_MUTE   },
+        { lbl: 'SWG', bit: AR_TRIG_SWING  },
+        { lbl: 'SLD', bit: AR_TRIG_SLIDE  },
+        { lbl: 'RTG', bit: AR_TRIG_RETRIG },
       ];
       const body = document.createElement('div');
       body.className = 'sp-flags';
       for (const f of flagDefs) {
+        const on = (flags & f.bit) !== 0;
         const el = document.createElement('div');
-        el.className = 'sp-flag' + (f.on ? ' on' : '');
+        el.className = 'sp-flag' + (on ? ' on' : '');
         el.textContent = f.lbl;
+        el.addEventListener('click', () => toggleTrigFlag(t, s, f.bit));
         body.appendChild(el);
       }
       return makeSec('FLAGS', body);
+    }
+
+    function toggleTrigFlag(t, s, bit) {
+      if (!lastRaw) return;
+      const trackBase = 4 + t * TRACK_V5_SZ;
+      const trigBits  = lastRaw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
+      const flags     = getTrigFlags(trigBits, s);
+      setTrigFlags(trigBits, s, flags ^ bit);
+      // Refresh panel
+      if (openPanel && openPanel.t === t && openPanel.s === s) {
+        openPanel.el.replaceWith(buildStepPanel(t, s));
+        openPanel.el = gridEl.querySelector('.step-panel');
+      }
     }
 
     // TRIG section: NOTE, VELO, LEN, PROB, then SYN/SMP/ENV/LFO
