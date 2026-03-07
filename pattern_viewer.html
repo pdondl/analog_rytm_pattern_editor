@@ -111,7 +111,7 @@
       margin-bottom: 4px;
     }
     .track-label-space {
-      flex: 0 0 66px;
+      flex: 0 0 80px;
     }
     .ruler-groups {
       display: flex;
@@ -136,7 +136,7 @@
       margin-bottom: 10px;
     }
     .track-label {
-      flex: 0 0 66px;
+      flex: 0 0 80px;
       display: flex;
       flex-direction: column;
       align-items: flex-end;
@@ -151,6 +151,10 @@
       font-size: 0.82em;
       color: #444;
       letter-spacing: 0;
+    }
+    .track-machine {
+      font-size: 0.72em;
+      color: #555;
     }
     .track-steps {
       display: flex;
@@ -553,6 +557,44 @@
     // Track speed labels
     const TRACK_SPEED_LABELS = ['2x', '3/2x', '1x', '3/4x', '1/2x', '1/4x', '1/8x'];
 
+    // Machine type offset within ar_sound_t
+    const MACHINE_TYPE_OFFSET = 0x7C;
+
+    // Machine names (indexed by machine_type 0-33, from libanalogrytm/sound.c)
+    const MACHINE_NAMES = [
+      'BD HARD','BD CLASSIC','SD HARD','SD CLASSIC','RS HARD','RS CLASSIC',
+      'CP CLASSIC','BT CLASSIC','XT CLASSIC','CH CLASSIC','OH CLASSIC',
+      'CY CLASSIC','CB CLASSIC','BD FM','SD FM','UT NOISE','UT IMPULSE',
+      'CH METALLIC','OH METALLIC','CY METALLIC','CB METALLIC','BD PLASTIC',
+      'BD SILKY','SD NATURAL','HH BASIC','CY RIDE','BD SHARP','DISABLE',
+      'SY DUAL VCO','SY CHIP','BD ACOUSTIC','SD ACOUSTIC','SY RAW','HH LAB',
+    ];
+
+    // Machine-specific synth param short names [paramIdx 0-7][machineId 0-33]
+    // Ported from ar_sound_machine_param_short_names in libanalogrytm/sound.c
+    const MACHINE_PARAM_NAMES = [
+      // P1 (synth_param_1):
+      ['LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','LEV','-','LEV','LEV','LEV','LEV','LEV','LEV'],
+      // P2 (synth_param_2):
+      ['TUN','TUN','TUN','TUN','TUN','T1','TON','TUN','TUN','TUN','TUN','TUN','TUN','TUN','TUN','LPF','ATK','TUN','TUN','TUN','TUN','TUN','TUN','TUN','TUN','TUN','TUN','-','TUN','TUN','TUN','TUN','TUN','OSC1'],
+      // P3 (synth_param_3):
+      ['DEC','DEC','DEC','DEC','DEC','DEC','NOD','DEC','DEC','DEC','DEC','DEC','DEC','DEC','DEC','DEC','DEC','DEC','DEC','DEC','DEC','DEC','DEC','BDY','DEC','DEC','DEC','-','DEC1','DCY','DEC','BDY','DCY','DEC'],
+      // P4 (synth_param_4):
+      ['HLD','HLD','SWD','DET','SWD','BAL','NUM','-','SWD','COL','COL','COL','DET','FMA','FMT','HPF','-','-','-','TON','DET','TYP','HLD','DEC','TON','TYP','HLD','-','DET','OF2','HLD','NOD','DET','OSC2'],
+      // P5 (synth_param_5):
+      ['SWT','SWT','TIC','SNP','TIC','T2','RAT','NOL','SWT','-','-','TON','PW1','SWT','FMD','LPQ','-','-','-','TRD','PW1','MOD','SWT','BAL','TRD','HIT','SWT','-','DEC2','OF3','SWT','NOL','NOL','OSC3'],
+      // P6 (synth_param_6):
+      ['SNP','SWP','NOD','NOD','NOL','SYM','NOL','SNP','NOD','-','-','-','PW2','FMS','NOD','ATK','-','-','-','-','PW2','SWT','SWD','LPF','RST','C1','SWD','-','BAL','OF4','SWD','HLD','WAV1','OSC4'],
+      // P7 (synth_param_7):
+      ['WAV','WAV','NOL','NOL','SYN','NOL','RND','SWD','NOL','-','-','-','-','FMD','NOL','SWT','-','-','-','-','-','SWD','DUS','LPF','-','C2','WAV','-','BND','WAV','WAV','SWD','WAV2','OSC5'],
+      // P8 (synth_param_8):
+      ['TIC','TRA','SWT','BAL','SWT','TIC','CPD','-','TON','-','-','-','-','FMT','FMA','SWD','POL','-','-','-','-','TIC','CLK','RES','-','C3','TIC','-','CFG','SPD','IMP','IMP','BAL','OSC6'],
+    ];
+
+    // Sysex IDs for stored sound pool
+    const AR_SYSEX_DUMP_ID_SOUND    = 0x53;
+    const AR_SYSEX_REQUEST_ID_SOUND = 0x63;
+
     // Workbuffer pattern request (0x6A)
     const PATTERN_REQUEST_X = new Uint8Array([
       0xF0, 0x00, 0x20, 0x3C, 0x07,
@@ -585,11 +627,11 @@
       0x07: { sec:'SRC',  lbl:'P8',   sndOff:0x2A },
       0x08: { sec:'SMPL', lbl:'TUN',  sndOff:0x2C },
       0x09: { sec:'SMPL', lbl:'FIN',  sndOff:0x2E },
-      0x0A: { sec:'SMPL', lbl:'NR',   sndOff:0x30 },
+      0x0A: { sec:'SMPL', lbl:'SMP',  sndOff:0x30 },
       0x0B: { sec:'SMPL', lbl:'BR',   sndOff:0x32 },
       0x0C: { sec:'SMPL', lbl:'STA',  sndOff:0x34 },
       0x0D: { sec:'SMPL', lbl:'END',  sndOff:0x36 },
-      0x0E: { sec:'SMPL', lbl:'LOOP', sndOff:0x38 },
+      0x0E: { sec:'SMPL', lbl:'LOP',  sndOff:0x38 },
       0x0F: { sec:'SMPL', lbl:'LEV',  sndOff:0x3A },
       0x10: { sec:'FLTR', lbl:'ATK',  sndOff:0x3C },
       0x11: { sec:'FLTR', lbl:'SUS',  sndOff:0x3E },
@@ -602,23 +644,29 @@
       0x18: { sec:'AMP',  lbl:'ATK',  sndOff:0x4C },
       0x19: { sec:'AMP',  lbl:'HLD',  sndOff:0x4E },
       0x1A: { sec:'AMP',  lbl:'DEC',  sndOff:0x50 },
-      0x1B: { sec:'AMP',  lbl:'DRV',  sndOff:0x52 },
-      0x1C: { sec:'AMP',  lbl:'DLY',  sndOff:0x54 },
+      0x1B: { sec:'AMP',  lbl:'OVR',  sndOff:0x52 },
+      0x1C: { sec:'AMP',  lbl:'DEL',  sndOff:0x54 },
       0x1D: { sec:'AMP',  lbl:'REV',  sndOff:0x56 },
       0x1E: { sec:'AMP',  lbl:'PAN',  sndOff:0x58 },
       0x1F: { sec:'AMP',  lbl:'VOL',  sndOff:0x5A },
       // 0x20: unknown — skipped
       0x21: { sec:'LFO',  lbl:'SPD',  sndOff:0x5E },
-      0x22: { sec:'LFO',  lbl:'MLT',  sndOff:0x60 },
+      0x22: { sec:'LFO',  lbl:'MUL',  sndOff:0x60 },
       0x23: { sec:'LFO',  lbl:'FAD',  sndOff:0x62 },
       0x24: { sec:'LFO',  lbl:'DST',  sndOff:0x64 },
       0x25: { sec:'LFO',  lbl:'WAV',  sndOff:0x66 },
-      0x26: { sec:'LFO',  lbl:'PHS',  sndOff:0x68 },
+      0x26: { sec:'LFO',  lbl:'SPH',  sndOff:0x68 },
       0x27: { sec:'LFO',  lbl:'MOD',  sndOff:0x6A },
       0x28: { sec:'LFO',  lbl:'DEP',  sndOff:0x6C },
     };
 
     const SECTION_KEYS = ['SRC','SMPL','FLTR','AMP','LFO'];
+
+    // Display order overrides (AR screen order differs from sysex byte order)
+    const SECTION_ORDER = {
+      'SMPL': [0x08, 0x09, 0x0B, 0x0A, 0x0C, 0x0D, 0x0E, 0x0F],
+      'FLTR': [0x10, 0x12, 0x11, 0x13, 0x14, 0x15, 0x16, 0x17],
+    };
 
     // Retrig rate labels: index 0-16, matching AR display (0=1/1, 16=1/80)
     const RETRIG_RATE_LABELS = [
@@ -649,6 +697,8 @@
     let plockValues = null;    // plockValues[track] = Map<plockType, Uint8Array[64]>
     let stepPage    = 0;
     let openPanel   = null;    // { t, s, el }
+    let soundPool   = new Map();       // slot (0-127) → decoded raw sound bytes
+    let pendingSoundReqs = new Set();  // slot numbers awaiting response
 
     // ─── UI refs ──────────────────────────────────────────────────────────────
 
@@ -699,6 +749,8 @@
     syxFileIn.addEventListener('change', () => {
       const file = syxFileIn.files[0];
       if (!file) return;
+      soundPool.clear();
+      pendingSoundReqs.clear();
       const reader = new FileReader();
       reader.onload = () => {
         const bytes = new Uint8Array(reader.result);
@@ -841,6 +893,25 @@
         return;
       }
 
+      // ── Sound pool dump ──────────────────────────────────────────────────
+      if (dumpId === AR_SYSEX_DUMP_ID_SOUND) {
+        let raw;
+        try { raw = decodeSysex7to8(syx); } catch (e) { return; }
+        const slotNr = syx[9];
+        soundPool.set(slotNr, raw);
+        pendingSoundReqs.delete(slotNr);
+        // When all pending sounds received, refresh display
+        if (pendingSoundReqs.size === 0 && lastRaw) {
+          renderGrid(lastRaw, stepPage);
+          if (openPanel) {
+            const { t, s } = openPanel;
+            openPanel.el.replaceWith(buildStepPanel(t, s));
+            openPanel.el = gridEl.querySelector('.step-panel');
+          }
+        }
+        return;
+      }
+
       // ── Pattern dump ─────────────────────────────────────────────────────
       const isPattern =
         dumpId === AR_SYSEX_DUMP_ID_PATTERN ||
@@ -884,8 +955,17 @@
         verHi: syx[7], verLo: syx[8], objNr: syx[9]
       };
       btnSaveSyx.disabled = false;
+      soundPool.clear();
+      pendingSoundReqs.clear();
       parsePlocks(raw);
       renderGrid(raw, stepPage);
+
+      // Request sound pool sounds for any sound-locked steps (MIDI only)
+      if (rytmOutput) {
+        const neededSlots = scanSoundLocks(raw);
+        if (neededSlots.size > 0) requestSoundPoolSlots(neededSlots);
+      }
+
       setStatus('Ready', 'ok');
     }
 
@@ -1147,6 +1227,13 @@
         metaSpan.textContent = speedStr + '\u00B7' + numSteps;
         label.appendChild(nameSpan);
         label.appendChild(metaSpan);
+        const machType = getTrackMachineType(t);
+        if (machType !== null) {
+          const machSpan = document.createElement('span');
+          machSpan.className = 'track-meta track-machine';
+          machSpan.textContent = MACHINE_NAMES[machType];
+          label.appendChild(machSpan);
+        }
         row.appendChild(label);
 
         // ── Steps outer ──
@@ -1260,7 +1347,17 @@
             if (isRetrig) modParts.push('RETRIG');
             if (hasSwing && swingAmount !== 0) modParts.push('SWING');
             if (isSlide)      modParts.push('SLIDE');
-            if (hasSoundLock) modParts.push('SND:' + (sndLock + 1));
+            if (hasSoundLock) {
+              let sndTip = 'SND:' + (sndLock + 1);
+              if (soundPool.has(sndLock)) {
+                const ps = soundPool.get(sndLock);
+                if (ps.length > MACHINE_TYPE_OFFSET) {
+                  const mt = ps[MACHINE_TYPE_OFFSET];
+                  if (mt < MACHINE_NAMES.length) sndTip += ' ' + MACHINE_NAMES[mt];
+                }
+              }
+              modParts.push(sndTip);
+            }
             cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
               + (isLockTrig ? ' · LOCK' : isOn ? ' · TRIG' : '')
               + (modParts.length ? ' [' + modParts.join(', ') + ']' : '')
@@ -1354,6 +1451,21 @@
       );
       const trigType = beyond ? 'BEYOND' : isLockTrig ? 'LOCK TRIG' : isOn ? 'TRIG' : 'EMPTY';
 
+      // Determine machine type: sound-locked → pool sound, else → kit
+      const sndLock = lastRaw[trackBase + SOUND_LOCK_OFFSET + s];
+      const hasSoundLock = sndLock !== 0xFF;
+      let stepMachineType = getTrackMachineType(t);
+      let poolSound = null;
+      if (hasSoundLock && soundPool.has(sndLock)) {
+        poolSound = soundPool.get(sndLock);
+        if (poolSound.length > MACHINE_TYPE_OFFSET) {
+          const mt = poolSound[MACHINE_TYPE_OFFSET];
+          if (mt < MACHINE_NAMES.length) stepMachineType = mt;
+        }
+      }
+
+      const machName = (stepMachineType !== null) ? MACHINE_NAMES[stepMachineType] : '';
+
       const panel = document.createElement('div');
       panel.className = 'step-panel';
 
@@ -1361,7 +1473,8 @@
       const hdr = document.createElement('div');
       hdr.className = 'sp-header';
       const title = document.createElement('span');
-      title.textContent = TRACK_NAMES[t] + ' · Step ' + (s + 1) + ' · ' + trigType;
+      title.textContent = TRACK_NAMES[t] + ' · Step ' + (s + 1) + ' · ' + trigType
+        + (machName ? ' · ' + machName : '');
       const closeBtn = document.createElement('button');
       closeBtn.className = 'sp-close';
       closeBtn.textContent = '×';
@@ -1378,7 +1491,7 @@
       secs.appendChild(buildTrigSection(t, s, flags));
       secs.appendChild(buildRetrigSection(t, s, flags));
       for (const secKey of SECTION_KEYS) {
-        secs.appendChild(buildParamSection(secKey, t, s));
+        secs.appendChild(buildParamSection(secKey, t, s, stepMachineType, poolSound));
       }
 
       panel.appendChild(secs);
@@ -1470,9 +1583,18 @@
       const sndLock  = lastRaw[trackBase + SOUND_LOCK_OFFSET + s];
       const hasSnd   = sndLock !== 0xFF;
 
+      let sndDisplay = hasSnd ? (sndLock + 1) : 'TRK';
+      if (hasSnd && soundPool.has(sndLock)) {
+        const ps = soundPool.get(sndLock);
+        if (ps.length > MACHINE_TYPE_OFFSET) {
+          const mt = ps[MACHINE_TYPE_OFFSET];
+          if (mt < MACHINE_NAMES.length) sndDisplay = (sndLock + 1) + ' ' + MACHINE_NAMES[mt];
+        }
+      }
+
       const body = document.createElement('div');
       body.className = 'sp-params';
-      body.appendChild(makeParamRow('SND',  hasSnd ? (sndLock + 1) : 'TRK', hasSnd));
+      body.appendChild(makeParamRow('SND', sndDisplay, hasSnd));
       body.appendChild(makeParamRow('NOTE', noteVal,                   noteLocked));
       body.appendChild(makeParamRow('VELO', veloVal,                   veloLocked));
       body.appendChild(makeParamRow('LEN',  lenVal,                    lenLocked));
@@ -1530,21 +1652,36 @@
     }
 
     // SRC / SMPL / FLTR / AMP / LFO sections
-    function buildParamSection(secKey, t, s) {
+    function buildParamSection(secKey, t, s, machineType, poolSound) {
       const body = document.createElement('div');
       body.className = 'sp-params';
 
-      for (const [ptStr, info] of Object.entries(PLOCK_INFO)) {
-        if (info.sec !== secKey) continue;
-        const pt = Number(ptStr);
+      // Use AR display order if defined, otherwise default numeric key order
+      const order = SECTION_ORDER[secKey]
+        || Object.keys(PLOCK_INFO).map(Number).filter(k => PLOCK_INFO[k].sec === secKey);
 
-        const kitDef = getKitDefault(t, info.sndOff);
+      for (const pt of order) {
+        const info = PLOCK_INFO[pt];
+        if (!info) continue;
+
+        // Override SRC labels with machine-specific names
+        let lbl = info.lbl;
+        if (secKey === 'SRC' && machineType !== null && machineType !== undefined
+            && pt <= 0x07) {
+          const ml = MACHINE_PARAM_NAMES[pt][machineType];
+          if (ml && ml !== '-') lbl = ml;
+        }
+
+        // Use pool sound defaults if available, otherwise kit defaults
+        const kitDef = poolSound && info.sndOff < poolSound.length
+          ? poolSound[info.sndOff]
+          : getKitDefault(t, info.sndOff);
         const plArr  = plockValues && plockValues[t].get(pt);
         const plVal  = plArr ? plArr[s] : 0xFF;
         const locked = plVal !== 0xFF;
 
         const displayVal = locked ? plVal : (kitDef !== null ? kitDef : '?');
-        body.appendChild(makeParamRow(info.lbl, displayVal, locked));
+        body.appendChild(makeParamRow(lbl, displayVal, locked));
       }
 
       return makeSec(secKey, body);
@@ -1587,6 +1724,40 @@
       const base = KIT_TRACKS_BASE + trackIdx * AR_SOUND_V5_SZ;
       if (base + soundOff >= lastKit.length) return null;
       return lastKit[base + soundOff];
+    }
+
+    function getTrackMachineType(trackIdx) {
+      if (!lastKit || trackIdx >= 12) return null;
+      const off = KIT_TRACKS_BASE + trackIdx * AR_SOUND_V5_SZ + MACHINE_TYPE_OFFSET;
+      if (off >= lastKit.length) return null;
+      const mt = lastKit[off];
+      return (mt < MACHINE_NAMES.length) ? mt : null;
+    }
+
+    function scanSoundLocks(raw) {
+      const slots = new Set();
+      for (let t = 0; t < AR_NUM_TRACKS; t++) {
+        const trackBase = 4 + t * TRACK_V5_SZ;
+        for (let s = 0; s < AR_NUM_STEPS; s++) {
+          const v = raw[trackBase + SOUND_LOCK_OFFSET + s];
+          if (v !== 0xFF) slots.add(v);
+        }
+      }
+      return slots;
+    }
+
+    function requestSoundPoolSlots(slots) {
+      if (!rytmOutput) return;
+      for (const nr of slots) {
+        if (soundPool.has(nr)) continue;
+        pendingSoundReqs.add(nr);
+        const req = new Uint8Array([
+          0xF0, 0x00, 0x20, 0x3C, 0x07,
+          0x00, AR_SYSEX_REQUEST_ID_SOUND, 0x01, 0x01, nr & 0x7F,
+          0x00, 0x00, 0x00, 0x05, 0xF7
+        ]);
+        rytmOutput.send(req);
+      }
     }
 
     // ─── Display helpers ──────────────────────────────────────────────────────
