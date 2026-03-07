@@ -499,6 +499,7 @@
     const AR_ELEKTRON_MFR_2          = 0x3C;
     const AR_SYSEX_DUMP_ID_PATTERN   = 0x54;   // saved pattern dump
     const AR_SYSEX_DUMPX_ID_PATTERN  = 0x5A;   // workbuffer pattern dump
+    const AR_SYSEX_DUMP_ID_KIT       = 0x52;   // stored kit dump
     const AR_SYSEX_DUMPX_ID_KIT      = 0x58;   // workbuffer kit dump
     const AR_TRIG_ENABLE             = 0x0001;  // bit 0
     const AR_TRIG_RETRIG             = 0x0002;  // bit 1
@@ -693,12 +694,15 @@
     let inSysex     = false;
     let lastRaw     = null;    // decoded pattern bytes
     let lastKit     = null;    // decoded kit bytes
+    let lastKitSyx  = null;    // original kit sysex bytes (for saving)
     let lastSyxMeta = null;    // { devId, dumpId, verHi, verLo, objNr }
     let plockValues = null;    // plockValues[track] = Map<plockType, Uint8Array[64]>
     let stepPage    = 0;
     let openPanel   = null;    // { t, s, el }
-    let soundPool   = new Map();       // slot (0-127) → decoded raw sound bytes
+    let soundPool    = new Map();      // slot (0-127) → decoded raw sound bytes
+    let soundPoolSyx = new Map();      // slot (0-127) → original sysex bytes (for saving)
     let pendingSoundReqs = new Set();  // slot numbers awaiting response
+    let savePending  = false;          // true while waiting for full pool before saving
 
     // ─── UI refs ──────────────────────────────────────────────────────────────
 
@@ -750,7 +754,9 @@
       const file = syxFileIn.files[0];
       if (!file) return;
       soundPool.clear();
+      soundPoolSyx.clear();
       pendingSoundReqs.clear();
+      savePending = false;
       const reader = new FileReader();
       reader.onload = () => {
         const bytes = new Uint8Array(reader.result);
@@ -780,8 +786,44 @@
 
     btnSaveSyx.addEventListener('click', () => {
       if (!lastRaw || !lastSyxMeta) return;
-      const syx = buildSysexMessage(lastRaw, lastSyxMeta);
-      const blob = new Blob([syx], { type: 'application/octet-stream' });
+      // If connected, request full sound pool before saving
+      if (rytmOutput) {
+        const allSlots = new Set();
+        for (let i = 0; i < 128; i++) allSlots.add(i);
+        // Only request slots we don't already have
+        const needed = [...allSlots].filter(s => !soundPool.has(s));
+        if (needed.length > 0) {
+          savePending = true;
+          setStatus('Requesting sound pool (' + needed.length + ' sounds)…');
+          requestSoundPoolSlots(new Set(needed));
+          // Timeout: save whatever we have after 10 seconds
+          setTimeout(() => {
+            if (savePending) { savePending = false; doSaveBundle(); }
+          }, 10000);
+          return;  // doSaveBundle() called when all received
+        }
+      }
+      doSaveBundle();
+    });
+
+    function doSaveBundle() {
+      if (!lastRaw || !lastSyxMeta) return;
+      const parts = [];
+      // Pattern
+      parts.push(buildSysexMessage(lastRaw, lastSyxMeta));
+      // Kit
+      if (lastKitSyx) parts.push(lastKitSyx);
+      // Sound pool
+      for (let i = 0; i < 128; i++) {
+        if (soundPoolSyx.has(i)) parts.push(soundPoolSyx.get(i));
+      }
+
+      const totalLen = parts.reduce((sum, p) => sum + p.length, 0);
+      const bundle = new Uint8Array(totalLen);
+      let off = 0;
+      for (const p of parts) { bundle.set(p, off); off += p.length; }
+
+      const blob = new Blob([bundle], { type: 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       const patInfo = metaEl.querySelector('span');
@@ -790,7 +832,8 @@
       a.download = name + '.syx';
       a.click();
       URL.revokeObjectURL(url);
-    });
+      setStatus('Saved ' + parts.length + ' sysex messages', 'ok');
+    }
 
     function findPorts() {
       rytmInput  = null;
@@ -880,10 +923,11 @@
       const dumpId = syx[6];
 
       // ── Kit dump ──────────────────────────────────────────────────────────
-      if (dumpId === AR_SYSEX_DUMPX_ID_KIT) {
+      if (dumpId === AR_SYSEX_DUMPX_ID_KIT || dumpId === AR_SYSEX_DUMP_ID_KIT) {
         let raw;
         try { raw = decodeSysex7to8(syx); } catch (e) { return; }
         lastKit = raw;
+        lastKitSyx = syx.slice();
         // Re-render open panel if any to update kit defaults
         if (openPanel) {
           const { t, s } = openPanel;
@@ -899,6 +943,7 @@
         try { raw = decodeSysex7to8(syx); } catch (e) { return; }
         const slotNr = syx[9];
         soundPool.set(slotNr, raw);
+        soundPoolSyx.set(slotNr, syx.slice());
         pendingSoundReqs.delete(slotNr);
         // When all pending sounds received, refresh display
         if (pendingSoundReqs.size === 0 && lastRaw) {
@@ -908,6 +953,7 @@
             openPanel.el.replaceWith(buildStepPanel(t, s));
             openPanel.el = gridEl.querySelector('.step-panel');
           }
+          if (savePending) { savePending = false; doSaveBundle(); }
         }
         return;
       }
@@ -956,7 +1002,9 @@
       };
       btnSaveSyx.disabled = false;
       soundPool.clear();
+      soundPoolSyx.clear();
       pendingSoundReqs.clear();
+      savePending = false;
       parsePlocks(raw);
       renderGrid(raw, stepPage);
 
@@ -1664,12 +1712,13 @@
         const info = PLOCK_INFO[pt];
         if (!info) continue;
 
-        // Override SRC labels with machine-specific names
+        // Override SRC labels with machine-specific names; skip unused params
         let lbl = info.lbl;
         if (secKey === 'SRC' && machineType !== null && machineType !== undefined
             && pt <= 0x07) {
           const ml = MACHINE_PARAM_NAMES[pt][machineType];
-          if (ml && ml !== '-') lbl = ml;
+          if (ml === '-') continue;  // param not used by this machine
+          if (ml) lbl = ml;
         }
 
         // Use pool sound defaults if available, otherwise kit defaults
