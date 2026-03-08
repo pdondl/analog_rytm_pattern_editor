@@ -2075,6 +2075,7 @@
           });
 
           let done = false;
+          const restore = () => { v.textContent = val; };
           const commit = () => {
             if (done) return;
             done = true;
@@ -2083,13 +2084,12 @@
               const clamped = Math.max(min, Math.min(max, parsed));
               if (clamped !== rawVal) { onChange(clamped); return; }
             }
-            // Restore display if unchanged
-            v.textContent = displayFn ? displayFn(rawVal) : val;
+            restore();
           };
           const cancel = () => {
             if (done) return;
             done = true;
-            v.textContent = displayFn ? displayFn(rawVal) : val;
+            restore();
           };
 
           // Slider release → sync number input and commit
