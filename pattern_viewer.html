@@ -2050,7 +2050,10 @@
             }
           });
 
+          let done = false;
           const commit = () => {
+            if (done) return;
+            done = true;
             const parsed = parseInt(numInp.value, 10);
             if (!isNaN(parsed)) {
               const clamped = Math.max(min, Math.min(max, parsed));
@@ -2059,25 +2062,28 @@
             // Restore display if unchanged
             v.textContent = displayFn ? displayFn(rawVal) : val;
           };
-
-          // Slider release → commit
-          slider.addEventListener('change', () => {
-            const sv = parseInt(slider.value, 10);
-            const clamped = Math.max(min, Math.min(max, sv));
-            if (clamped !== rawVal) { onChange(clamped); return; }
+          const cancel = () => {
+            if (done) return;
+            done = true;
             v.textContent = displayFn ? displayFn(rawVal) : val;
+          };
+
+          // Slider release → sync number input and commit
+          slider.addEventListener('pointerup', () => {
+            numInp.value = parseInt(slider.value, 10);
+            commit();
           });
 
           numInp.addEventListener('keydown', (ke) => {
             if (ke.key === 'Enter')  { ke.preventDefault(); commit(); }
-            if (ke.key === 'Escape') { ke.preventDefault(); v.textContent = displayFn ? displayFn(rawVal) : val; }
+            if (ke.key === 'Escape') { ke.preventDefault(); cancel(); }
             ke.stopPropagation();
           });
 
-          // Blur on number input → commit (but not if focus moved to slider)
-          numInp.addEventListener('blur', (be) => {
+          // Focus leaves editor entirely → commit
+          editor.addEventListener('focusout', () => {
             setTimeout(() => {
-              if (!editor.contains(document.activeElement)) commit();
+              if (!done && !editor.contains(document.activeElement)) commit();
             }, 0);
           });
         });
