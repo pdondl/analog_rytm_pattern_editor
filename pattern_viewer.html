@@ -1332,13 +1332,10 @@
             const sndLock  = lastRaw[trackBase + SOUND_LOCK_OFFSET + stepIdx];
             const hasSoundLock = !beyond && sndLock !== 0xFF;
 
-            // AR shows a lock-trig whenever SYN and SMP are both switched off,
-            // regardless of ENV/LFO state.
+            // AR shows a lock-trig when ENABLE is set but SYN and SMP are
+            // both switched off, regardless of ENV/LFO state.
             const synSmpOff  = (flags & (AR_TRIG_SYN_PL_SW | AR_TRIG_SMP_PL_SW)) === 0;
-            const isLockTrig = !beyond && (
-              (!isOn && hasPlock) ||
-              (isOn && synSmpOff)
-            );
+            const isLockTrig = !beyond && isOn && synSmpOff;
 
             if (!beyond) {
               if (isOn || isLockTrig) activeSteps[pageIdx] = true;
@@ -1410,17 +1407,63 @@
               + (isLockTrig ? ' · LOCK' : isOn ? ' · TRIG' : '')
               + (modParts.length ? ' [' + modParts.join(', ') + ']' : '')
               + (beyond ? ' · beyond' : '')
-              + '\n⌘+click to inspect';
+              + '\nclick: trig · alt: lock · shift: mute · ⌘: inspect';
 
-            // Cmd+click → open step inspector panel
             cell.addEventListener('click', (e) => {
-              if (!e.metaKey && !e.ctrlKey) return;
+              if (beyond || !lastRaw) return;
               e.preventDefault();
-              if (openPanel && openPanel.t === t && openPanel.s === stepIdx) {
-                closeStepPanel();
-              } else {
-                openStepPanel(t, stepIdx);
+
+              // Cmd/Ctrl+click → open/close step inspector panel
+              if (e.metaKey || e.ctrlKey) {
+                if (openPanel && openPanel.t === t && openPanel.s === stepIdx) {
+                  closeStepPanel();
+                } else {
+                  openStepPanel(t, stepIdx);
+                }
+                return;
               }
+
+              const curFlags  = getTrigFlags(trigBits, stepIdx);
+              const curOn     = (curFlags & AR_TRIG_ENABLE) !== 0;
+              const SYN_SMP   = AR_TRIG_SYN_PL_SW | AR_TRIG_SMP_PL_SW;
+
+              if (e.shiftKey) {
+                // Shift+click → toggle mute (only meaningful on active trigs)
+                if (curOn) {
+                  setTrigFlags(trigBits, stepIdx, curFlags ^ AR_TRIG_MUTE);
+                  refreshAfterEdit();
+                }
+                return;
+              }
+
+              if (e.altKey) {
+                // Alt+click → toggle lock trig
+                if (!curOn) {
+                  // Off → enable as lock trig (clear SYN+SMP, leave ENV/LFO)
+                  setTrigFlags(trigBits, stepIdx,
+                    (curFlags | AR_TRIG_ENABLE) & ~SYN_SMP);
+                } else if ((curFlags & SYN_SMP) !== 0) {
+                  // Normal trig → lock trig (clear SYN+SMP, keep enable)
+                  setTrigFlags(trigBits, stepIdx, curFlags & ~SYN_SMP);
+                } else {
+                  // Lock trig → off (clear enable, leave other flags)
+                  setTrigFlags(trigBits, stepIdx, curFlags & ~AR_TRIG_ENABLE);
+                }
+                refreshAfterEdit();
+                return;
+              }
+
+              // Regular click → toggle trig
+              if (curOn) {
+                // On → off: clear enable only, leave other flags
+                setTrigFlags(trigBits, stepIdx, curFlags & ~AR_TRIG_ENABLE);
+              } else {
+                // Off → on: set enable, ensure SYN+SMP on if both were off
+                let nf = curFlags | AR_TRIG_ENABLE;
+                if ((nf & SYN_SMP) === 0) nf |= SYN_SMP;
+                setTrigFlags(trigBits, stepIdx, nf);
+              }
+              refreshAfterEdit();
             });
 
               beat.appendChild(cell);
@@ -1568,17 +1611,19 @@
       return makeSec('FLAGS', body);
     }
 
+    function refreshAfterEdit() {
+      const had = openPanel ? { t: openPanel.t, s: openPanel.s } : null;
+      renderGrid(lastRaw, stepPage);
+      if (had) openStepPanel(had.t, had.s);
+    }
+
     function toggleTrigFlag(t, s, bit) {
       if (!lastRaw) return;
       const trackBase = 4 + t * TRACK_V5_SZ;
       const trigBits  = lastRaw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
       const flags     = getTrigFlags(trigBits, s);
       setTrigFlags(trigBits, s, flags ^ bit);
-      // Refresh panel
-      if (openPanel && openPanel.t === t && openPanel.s === s) {
-        openPanel.el.replaceWith(buildStepPanel(t, s));
-        openPanel.el = gridEl.querySelector('.step-panel');
-      }
+      refreshAfterEdit();
     }
 
     // TRIG section: NOTE, VELO, LEN, PROB, then SYN/SMP/ENV/LFO

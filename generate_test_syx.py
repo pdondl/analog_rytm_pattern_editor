@@ -15,6 +15,12 @@ AR_NUM_STEPS       = 64
 
 KIT_TRACKS_BASE    = 0x002E
 MACHINE_TYPE_OFF   = 0x7C
+NOTE_OFF           = 0x0070  # notes[64] within track
+VELOCITY_OFF       = 0x00B0  # velocities[64] within track
+NOTE_LEN_OFF       = 0x00F0  # note_lengths[64] within track
+MICRO_TIMING_OFF   = 0x0130  # micro_timings[64] within track
+RETRIG_LEN_OFF     = 0x0170  # retrig_lengths[64] within track
+RETRIG_RATE_OFF    = 0x01B0  # retrig_rates[64] within track
 DEFAULT_NOTE_OFF   = 0x0230  # default_note within track
 DEFAULT_VELO_OFF   = 0x0231  # default_velocity within track
 DEFAULT_LEN_OFF    = 0x0232  # default_note_len within track
@@ -22,6 +28,31 @@ NUM_STEPS_OFF      = 0x0235  # num_steps within track
 SOUND_LOCK_OFF     = 0x0237  # sound_locks[64] within track
 SPEED_OFF          = 0x0277  # flags_and_speed within track
 TRIG_PROB_OFF      = 0x0278  # trig_probability within track
+
+# Plock sequences
+PLOCK_SEQS_BASE    = 0x2091
+PLOCK_SEQ_SZ       = 0x42    # 66 bytes: type(1) + track(1) + values(64)
+NUM_PLOCK_SEQS     = 72
+
+# BPM
+BPM_MSB_OFF        = 0x332A
+BPM_LSB_OFF        = 0x332B
+KIT_NUMBER_OFF     = 0x3325
+
+# Plock types (matching PLOCK_INFO in viewer)
+PL_SRC_P1   = 0x00  # SRC param 1 (LEV for most machines)
+PL_SRC_P2   = 0x01  # SRC param 2 (TUN for most machines)
+PL_SRC_P3   = 0x02  # SRC param 3 (DEC for most machines)
+PL_SMP_TUN  = 0x08  # Sample tune
+PL_FLT_FRQ  = 0x14  # Filter frequency
+PL_FLT_RES  = 0x15  # Filter resonance
+PL_AMP_DEC  = 0x1A  # Amp decay
+PL_AMP_DEL  = 0x1C  # Delay send
+PL_AMP_REV  = 0x1D  # Reverb send
+PL_AMP_PAN  = 0x1E  # Pan
+PL_AMP_VOL  = 0x1F  # Volume
+PL_LFO_SPD  = 0x21  # LFO speed
+PL_LFO_DEP  = 0x28  # LFO depth
 
 # Trig bits: 14 bits per step, packed in 112 bytes (64 steps × 14 bits = 896 bits = 112 bytes)
 TRIG_ENABLE        = 0x0001
@@ -134,26 +165,43 @@ def set_trig_flags(trig_bits, step, val):
             byte_off += 1
 
 
+def add_plock(raw, seq_idx, track, plock_type, step_values):
+    """Write a plock sequence. step_values is a dict {step: value}.
+    seq_idx is the plock sequence slot (0-71)."""
+    base = PLOCK_SEQS_BASE + seq_idx * PLOCK_SEQ_SZ
+    raw[base] = plock_type
+    raw[base + 1] = track
+    # Values default to 0xFF (no lock); set specific steps
+    for s in range(AR_NUM_STEPS):
+        raw[base + 2 + s] = 0xFF
+    for s, v in step_values.items():
+        raw[base + 2 + s] = v
+
+
 def make_pattern():
-    """Create a test pattern with trigs on some tracks."""
+    """Create a test pattern with trigs, plocks, note/velocity locks, and BPM."""
     raw = bytearray(AR_PATTERN_V5_SZ)
 
     # Magic bytes
     raw[0:4] = b'\x00\x00\x00\x00'
 
     # Fill plock sequence area with 0xFF (unused)
-    # 72 sequences × 66 bytes each, starting at offset 0x2091
-    PLOCK_SEQS_BASE = 0x2091
-    PLOCK_SEQ_SZ = 0x42  # 66 bytes
-    NUM_PLOCK_SEQS = 72
     plock_end = PLOCK_SEQS_BASE + NUM_PLOCK_SEQS * PLOCK_SEQ_SZ
     for i in range(PLOCK_SEQS_BASE, plock_end):
         raw[i] = 0xFF
 
-    # Default machines per track (typical AR default kit)
+    # BPM: 125.0 → 125 * 120 = 15000
+    bpm = 125.0
+    bpm_raw = int(bpm * 120)
+    raw[BPM_MSB_OFF] = (bpm_raw >> 8) & 0xFF
+    raw[BPM_LSB_OFF] = bpm_raw & 0xFF
+
+    # Kit number (0 = kit 1)
+    raw[KIT_NUMBER_OFF] = 0x00
+
+    # Track configs: (machine, steps, speed, trig_steps, sound_locks)
     track_configs = [
-        # (machine, steps, speed, trig_steps, sound_locks)
-        ('BD_HARD',     16, 2, [0, 4, 8, 12], {8: 5}),          # BD: 4-on-floor, step 9 → pool slot 6 (SY DUAL VCO)
+        ('BD_HARD',     16, 2, [0, 4, 8, 12], {8: 5}),         # BD: 4-on-floor, step 9 → SY DUAL VCO
         ('SD_CLASSIC',  16, 2, [4, 12], {}),                    # SD: backbeat
         ('RS_CLASSIC',  16, 2, [], {}),                          # RS: off
         ('CP_CLASSIC',  16, 2, [4, 12], {}),                    # CP: with snare
@@ -161,8 +209,8 @@ def make_pattern():
         ('XT_CLASSIC',  16, 2, [2, 6, 10, 14], {}),             # LT: offbeat 16ths
         ('CH_CLASSIC',  16, 2, [], {}),                          # MT: off
         ('OH_CLASSIC',  16, 2, [], {}),                          # HT: off
-        ('CH_METALLIC', 16, 2, [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15], {}),  # CH: every step
-        ('OH_METALLIC', 16, 2, [2, 6, 10, 14], {6: 10}),       # OH: offbeat, step 7 → pool slot 11 (HH LAB)
+        ('CH_METALLIC', 16, 2, list(range(16)), {}),             # CH: every step
+        ('OH_METALLIC', 16, 2, [2, 6, 10, 14], {6: 10}),        # OH: offbeat, step 7 → HH LAB
         ('CY_RIDE',     16, 2, [0, 8], {}),                     # CY: every bar
         ('CB_CLASSIC',  16, 2, [4, 12], {}),                    # CB: offbeat
         ('BD_HARD',     16, 2, [], {}),                          # FX: off
@@ -171,63 +219,115 @@ def make_pattern():
     for t, (mach, steps, speed, trigs, slocks) in enumerate(track_configs):
         base = 4 + t * TRACK_V5_SZ
 
-        # Trig bits (112 bytes starting at offset 0)
+        # Trig bits
         trig_area = bytearray(raw[base:base + 112])
         for s in trigs:
             set_trig_flags(trig_area, s, TRIG_NORMAL)
         raw[base:base + 112] = trig_area
 
-        # Notes: 0xFF = default
+        # Per-step fields: init to defaults
         for s in range(AR_NUM_STEPS):
-            raw[base + 0x0070 + s] = 0xFF
-
-        # Velocities: 0xFF = default
-        for s in range(AR_NUM_STEPS):
-            raw[base + 0x00B0 + s] = 0xFF
-
-        # Note lengths: 0xFF = default
-        for s in range(AR_NUM_STEPS):
-            raw[base + 0x00F0 + s] = 0xFF
-
-        # Micro timing: 0x00 = center
-        for s in range(AR_NUM_STEPS):
-            raw[base + 0x0130 + s] = 0x00
-
-        # Retrig lengths: 0xFF = default
-        for s in range(AR_NUM_STEPS):
-            raw[base + 0x0170 + s] = 0xFF
-
-        # Retrig rates: 0xFF = default
-        for s in range(AR_NUM_STEPS):
-            raw[base + 0x01B0 + s] = 0xFF
-
-        # Sound locks: 0xFF = no lock
-        for s in range(AR_NUM_STEPS):
+            raw[base + NOTE_OFF + s]       = 0xFF  # no note lock
+            raw[base + VELOCITY_OFF + s]   = 0xFF  # no velocity lock
+            raw[base + NOTE_LEN_OFF + s]   = 0xFF  # no length lock
+            raw[base + MICRO_TIMING_OFF + s] = 0x00  # centered
+            raw[base + RETRIG_LEN_OFF + s] = 0xFF
+            raw[base + RETRIG_RATE_OFF + s] = 0xFF
             raw[base + SOUND_LOCK_OFF + s] = 0xFF
+
+        # Sound locks
         for s, slot in slocks.items():
             raw[base + SOUND_LOCK_OFF + s] = slot
 
-        # Num steps
-        raw[base + NUM_STEPS_OFF] = steps
+        # Track settings
+        raw[base + NUM_STEPS_OFF]    = steps
+        raw[base + SPEED_OFF]        = speed
+        raw[base + DEFAULT_NOTE_OFF] = 60    # C3
+        raw[base + DEFAULT_VELO_OFF] = 100
+        raw[base + DEFAULT_LEN_OFF]  = 0x40
+        raw[base + TRIG_PROB_OFF]    = 100
 
-        # Speed (2 = 1x)
-        raw[base + SPEED_OFF] = speed
+    # ── Per-step note, velocity, micro-timing locks ────────────────────────
 
-        # Default note (C3 = 60), velocity (100), length, probability
-        raw[base + DEFAULT_NOTE_OFF] = 60    # default_note
-        raw[base + DEFAULT_VELO_OFF] = 100   # default_velocity
-        raw[base + DEFAULT_LEN_OFF]  = 0x40  # default_note_length
-        raw[base + TRIG_PROB_OFF]    = 100   # default_trig_probability
+    # BD (track 0): velocity accent on beat 1 (step 0)
+    bd_base = 4 + 0 * TRACK_V5_SZ
+    raw[bd_base + VELOCITY_OFF + 0] = 127   # accent on beat 1
+    raw[bd_base + VELOCITY_OFF + 8] = 110   # slightly accented beat 3
 
-    # Pattern name at offset 0x3319 (FW1.70): 15 bytes
-    name = b'TEST PATTERN\x00\x00\x00'
-    name_off = AR_PATTERN_V5_SZ - 20  # approximate offset for name
-    # Actually let's put the kit number at the right offset
-    # Kit number at pattern offset: need to check
-    # KIT_NUMBER_OFFSET is at a fixed position in the pattern
-    # From the viewer: const KIT_NUMBER_OFFSET = 0x3320;  (approximately)
-    # Let's set it to kit 0
-    raw[0x3325] = 0x00  # kit number (0 = kit 1)
+    # SD (track 1): note variation (different pitches)
+    sd_base = 4 + 1 * TRACK_V5_SZ
+    raw[sd_base + NOTE_OFF + 4]  = 62   # D3 on beat 2
+    raw[sd_base + NOTE_OFF + 12] = 58   # A#2 on beat 4
+
+    # CH (track 8): micro-timing swing feel on odd steps
+    ch_base = 4 + 8 * TRACK_V5_SZ
+    for s in [1, 3, 5, 7, 9, 11, 13, 15]:
+        raw[ch_base + MICRO_TIMING_OFF + s] = 8  # push late
+
+    # OH (track 9): velocity dynamics
+    oh_base = 4 + 9 * TRACK_V5_SZ
+    raw[oh_base + VELOCITY_OFF + 2]  = 80
+    raw[oh_base + VELOCITY_OFF + 6]  = 120  # accented (sound-locked step)
+    raw[oh_base + VELOCITY_OFF + 10] = 70
+    raw[oh_base + VELOCITY_OFF + 14] = 90
+
+    # ── Plock sequences ───────────────────────────────────────────────────
+
+    seq = 0  # plock sequence counter
+
+    # BD (track 0): sweep decay across the bar
+    add_plock(raw, seq, 0, PL_SRC_P3, {0: 90, 4: 70, 8: 50, 12: 40})
+    seq += 1
+
+    # BD (track 0): filter freq movement
+    add_plock(raw, seq, 0, PL_FLT_FRQ, {0: 100, 4: 80, 8: 60, 12: 90})
+    seq += 1
+
+    # SD (track 1): reverb send on beat 4 only
+    add_plock(raw, seq, 1, PL_AMP_REV, {4: 0, 12: 80})
+    seq += 1
+
+    # SD (track 1): pan alternating
+    add_plock(raw, seq, 1, PL_AMP_PAN, {4: 40, 12: 88})
+    seq += 1
+
+    # CP (track 3): volume lock (no trig on some steps = lock trigs)
+    # Steps 4 and 12 have trigs; add plocks on steps WITHOUT trigs too
+    add_plock(raw, seq, 3, PL_AMP_VOL, {2: 60, 6: 45, 10: 30, 14: 50})
+    seq += 1
+
+    # LT (track 5): sample tune sweep across offbeat hits
+    add_plock(raw, seq, 5, PL_SMP_TUN, {2: 50, 6: 60, 10: 70, 14: 80})
+    seq += 1
+
+    # LT (track 5): delay send increasing
+    add_plock(raw, seq, 5, PL_AMP_DEL, {2: 20, 6: 50, 10: 80, 14: 110})
+    seq += 1
+
+    # CH (track 8): filter freq pattern for texture
+    add_plock(raw, seq, 8, PL_FLT_FRQ, {
+        0: 100, 1: 90, 2: 80, 3: 70, 4: 100, 5: 90, 6: 80, 7: 70,
+        8: 110, 9: 100, 10: 90, 11: 80, 12: 110, 13: 100, 14: 90, 15: 80,
+    })
+    seq += 1
+
+    # CH (track 8): amp decay variation
+    add_plock(raw, seq, 8, PL_AMP_DEC, {
+        0: 40, 2: 30, 4: 40, 6: 30, 8: 50, 10: 35, 12: 50, 14: 35,
+    })
+    seq += 1
+
+    # OH (track 9): LFO depth on accented step
+    add_plock(raw, seq, 9, PL_LFO_DEP, {6: 100, 14: 80})
+    seq += 1
+
+    # CY (track 10): long reverb tail
+    add_plock(raw, seq, 10, PL_AMP_REV, {0: 90, 8: 60})
+    seq += 1
+
+    # CB (track 11): SRC tune variation
+    add_plock(raw, seq, 11, PL_SRC_P2, {4: 70, 12: 55})
+    seq += 1
 
     return raw
 
