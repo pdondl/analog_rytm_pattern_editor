@@ -435,6 +435,26 @@
     .sp-val.locked {
       color: #cc44aa;
     }
+    .sp-val.editable {
+      cursor: pointer;
+      user-select: none;
+      padding: 0 3px;
+      border-radius: 1px;
+    }
+    .sp-val.editable:hover {
+      background: rgba(255,255,255,0.06);
+    }
+    .sp-val input {
+      width: 44px;
+      background: #0a0a0a;
+      color: inherit;
+      border: 1px solid #cc44aa;
+      border-radius: 1px;
+      font: inherit;
+      font-size: inherit;
+      padding: 0 2px;
+      outline: none;
+    }
 
     /* SYN/SMP/ENV/LFO flag row inside TRIG section */
     .sp-sw-row {
@@ -1531,16 +1551,11 @@
       const trigBits  = lastRaw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
       const flags     = getTrigFlags(trigBits, s);
       const isOn      = (flags & AR_TRIG_ENABLE) !== 0;
-      const enBits    = flags & 0x3840;
-      const swBits    = flags & 0x0780;
       const numSteps  = lastRaw[trackBase + NUM_STEPS_OFFSET];
       const beyond    = s >= numSteps;
-      const hasPlock  = plockValues && plockValues[t].size > 0 &&
-        [...plockValues[t].values()].some(arr => arr[s] !== 0xFF);
-      const isLockTrig = !beyond && (
-        (!isOn && hasPlock) || (isOn && swBits === 0 && enBits !== 0)
-      );
-      const trigType = beyond ? 'BEYOND' : isLockTrig ? 'LOCK TRIG' : isOn ? 'TRIG' : 'EMPTY';
+      const synSmpOff  = (flags & (AR_TRIG_SYN_PL_SW | AR_TRIG_SMP_PL_SW)) === 0;
+      const isLockTrig = !beyond && isOn && synSmpOff;
+      const trigType = beyond ? 'BEYOND' : isLockTrig ? 'PARAMETER LOCK' : isOn ? 'TRIG' : 'EMPTY';
 
       // Determine machine type: sound-locked → pool sound, else → kit
       const sndLock = lastRaw[trackBase + SOUND_LOCK_OFFSET + s];
@@ -1687,18 +1702,80 @@
 
       const body = document.createElement('div');
       body.className = 'sp-params';
-      body.appendChild(makeParamRow('SND', sndDisplay, hasSnd));
-      body.appendChild(makeParamRow('NOTE', noteVal,                   noteLocked));
-      body.appendChild(makeParamRow('VELO', veloVal,                   veloLocked));
-      body.appendChild(makeParamRow('LEN',  lenVal,                    lenLocked));
-      body.appendChild(makeParamRow('PROB', probStr,                   probLocked));
 
-      // Micro-timing (-23..+23): sign-extend 6-bit value from lower bits
+      // Helper: write a byte to lastRaw and refresh
+      const writeByte = (off, val) => {
+        lastRaw[off] = val;
+        refreshAfterEdit();
+      };
+
+      // SND: 0-127 = pool slot, display as slot+1; clear = no lock (TRK)
+      const sndOff = trackBase + SOUND_LOCK_OFFSET + s;
+      const sndRawVal = hasSnd ? sndLock : 128;
+      const sndDispFn = (v) => {
+        if (v >= 128) return 'TRK';
+        let d = String(v + 1);
+        if (soundPool.has(v)) {
+          const ps = soundPool.get(v);
+          if (ps.length > MACHINE_TYPE_OFFSET) {
+            const mt = ps[MACHINE_TYPE_OFFSET];
+            if (mt < MACHINE_NAMES.length) d += ' ' + MACHINE_NAMES[mt];
+          }
+        }
+        return d;
+      };
+      body.appendChild(makeParamRow('SND', sndDisplay, hasSnd, {
+        min: 0, max: 128, rawVal: sndRawVal, displayFn: sndDispFn,
+        onChange: (v) => writeByte(sndOff, v >= 128 ? 0xFF : v),
+      }));
+
+      // NOTE: edit the 7-bit note value, preserve bit 7 (trig condition flag)
+      const noteOff = trackBase + NOTE_OFFSET + s;
+      const noteRawVal = noteLocked ? (noteRaw & 0x7F) : 128;
+      body.appendChild(makeParamRow('NOTE', noteVal, noteLocked, {
+        min: 0, max: 128, rawVal: noteRawVal, displayFn: (v) => v >= 128 ? midiNoteToName(defNote) : midiNoteToName(v),
+        onChange: (v) => {
+          if (v >= 128) { writeByte(noteOff, (noteRaw & 0x80) | 0x7F); }
+          else { writeByte(noteOff, (noteRaw & 0x80) | (v & 0x7F)); }
+        },
+      }));
+
+      // VELO: 0-127 = value, 128 = clear (use default)
+      const veloOff = trackBase + VELOCITY_OFFSET + s;
+      const veloRawVal = veloLocked ? veloRaw : 128;
+      body.appendChild(makeParamRow('VELO', veloVal, veloLocked, {
+        min: 0, max: 128, rawVal: veloRawVal,
+        displayFn: (v) => v >= 128 ? defVelo : v,
+        onChange: (v) => writeByte(veloOff, v >= 128 ? 0xFF : v),
+      }));
+
+      // LEN: 0-127 = value (127=∞), 128 = clear (use default)
+      const lenOff = trackBase + NOTE_LEN_OFFSET + s;
+      const lenRawVal = lenLocked ? lenRaw : 128;
+      body.appendChild(makeParamRow('LEN', lenVal, lenLocked, {
+        min: 0, max: 128, rawVal: lenRawVal,
+        displayFn: (v) => v >= 128 ? noteLenStr(defLen) : noteLenStr(v),
+        onChange: (v) => writeByte(lenOff, v >= 128 ? 0xFF : v),
+      }));
+
+      // PROB: read-only for now (trig condition bits spread across multiple bytes)
+      body.appendChild(makeParamRow('PROB', probStr, probLocked));
+
+      // UTIME: -23..+23, stored in lower 6 bits, preserve upper bits (trig condition)
       const microRaw    = lastRaw[trackBase + MICRO_TIMING_OFFSET + s];
       const microVal    = microRaw & 0x3F;
       const microSigned = (microVal & 0x20) ? microVal - 64 : microVal;
       const utimeStr    = (microSigned > 0 ? '+' : '') + microSigned;
-      body.appendChild(makeParamRow('UTIME', utimeStr, microSigned !== 0));
+      const utimeDispFn = (v) => (v > 0 ? '+' : '') + v;
+      body.appendChild(makeParamRow('UTIME', utimeStr, microSigned !== 0, {
+        min: -23, max: 23, rawVal: microSigned, displayFn: utimeDispFn,
+        onChange: (v) => {
+          // Encode signed value into 6-bit field, preserve upper 2 bits
+          const enc = v < 0 ? (v + 64) & 0x3F : v & 0x3F;
+          lastRaw[trackBase + MICRO_TIMING_OFFSET + s] = (microRaw & 0xC0) | enc;
+          refreshAfterEdit();
+        },
+      }));
 
       // SYN / SMP / ENV / LFO retrigger switches
       const swDefs = [
@@ -1712,9 +1789,9 @@
       for (const sw of swDefs) {
         const on = (flags & sw.bit) !== 0;
         const el = document.createElement('div');
-        // OFF is the deviation from default (default_trig_flags sets all SW bits ON)
         el.className = 'sp-flag' + (on ? ' on' : '');
         el.textContent = sw.lbl;
+        el.addEventListener('click', () => toggleTrigFlag(t, s, sw.bit));
         swRow.appendChild(el);
       }
       body.appendChild(swRow);
@@ -1738,10 +1815,78 @@
 
       const body = document.createElement('div');
       body.className = 'sp-params';
-      body.appendChild(makeParamRow('RATE', rateStr, isRetrig));
-      body.appendChild(makeParamRow('LEN',  lenStr,  isRetrig));
-      body.appendChild(makeParamRow('VEL',  velStr,  isRetrig && velSigned !== 0));
+
+      // RATE: 0-16, stored in lower 5 bits; preserve upper bits (trig condition)
+      const rateOff  = trackBase + RETRIG_RATE_OFFSET + s;
+      const rateFull = lastRaw[rateOff];
+      body.appendChild(makeParamRow('RATE', rateStr, isRetrig, {
+        min: 0, max: 16, rawVal: rateRaw,
+        displayFn: (v) => RETRIG_RATE_LABELS[v] ?? String(v),
+        onChange: (v) => {
+          lastRaw[rateOff] = (rateFull & 0xE0) | (v & 0x1F);
+          refreshAfterEdit();
+        },
+      }));
+
+      // LEN: 0-127, stored in lower 7 bits; preserve bit 7 (trig condition)
+      const lenOff2  = trackBase + RETRIG_LENGTH_OFFSET + s;
+      const lenFull  = lastRaw[lenOff2];
+      body.appendChild(makeParamRow('LEN', lenStr, isRetrig, {
+        min: 0, max: 127, rawVal: lenRaw,
+        displayFn: (v) => v === 127 ? '\u221E' : String(v),
+        onChange: (v) => {
+          lastRaw[lenOff2] = (lenFull & 0x80) | (v & 0x7F);
+          refreshAfterEdit();
+        },
+      }));
+
+      // VEL: -128..+127, stored as unsigned byte interpreted as signed
+      const velOff = trackBase + RETRIG_VELO_OFFSET + s;
+      body.appendChild(makeParamRow('VEL', velStr, isRetrig && velSigned !== 0, {
+        min: -128, max: 127, rawVal: velSigned,
+        displayFn: (v) => (v >= 0 ? '+' : '') + v,
+        onChange: (v) => {
+          lastRaw[velOff] = v < 0 ? v + 256 : v;
+          refreshAfterEdit();
+        },
+      }));
+
       return makeSec('RETRIG', body);
+    }
+
+    // Write a plock value into lastRaw. Finds or allocates the plock sequence
+    // slot for the given track + param type. Deallocates if all steps become 0xFF.
+    function writePlock(t, pt, s, val) {
+      if (!lastRaw) return;
+      const end = PLOCK_SEQS_BASE + NUM_PLOCK_SEQS * PLOCK_SEQ_SZ;
+      if (lastRaw.length < end) return;
+
+      // Find existing slot for this track + param type
+      let slotBase = -1;
+      let freeBase = -1;
+      for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
+        const base = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
+        if (lastRaw[base] === pt && lastRaw[base + 1] === t) { slotBase = base; break; }
+        if (freeBase < 0 && lastRaw[base] === 0xFF) freeBase = base;
+      }
+
+      if (slotBase >= 0) {
+        // Existing slot — write the value
+        lastRaw[slotBase + 2 + s] = val;
+        // If all steps are now 0xFF, deallocate the slot
+        let allEmpty = true;
+        for (let i = 0; i < AR_NUM_STEPS; i++) {
+          if (lastRaw[slotBase + 2 + i] !== 0xFF) { allEmpty = false; break; }
+        }
+        if (allEmpty) { lastRaw[slotBase] = 0xFF; lastRaw[slotBase + 1] = 0xFF; }
+      } else if (val !== 0xFF && freeBase >= 0) {
+        // Allocate new slot
+        lastRaw[freeBase] = pt;
+        lastRaw[freeBase + 1] = t;
+        for (let i = 0; i < AR_NUM_STEPS; i++) lastRaw[freeBase + 2 + i] = 0xFF;
+        lastRaw[freeBase + 2 + s] = val;
+      }
+      // else: no slot found and val is 0xFF — nothing to do
     }
 
     // SRC / SMPL / FLTR / AMP / LFO sections
@@ -1775,7 +1920,17 @@
         const locked = plVal !== 0xFF;
 
         const displayVal = locked ? plVal : (kitDef !== null ? kitDef : '?');
-        body.appendChild(makeParamRow(lbl, displayVal, locked));
+        // Editable: 0-127 = plock value, 128 = clear (use default)
+        const plRawVal = locked ? plVal : 128;
+        const ptCapture = pt;  // capture for closure
+        body.appendChild(makeParamRow(lbl, displayVal, locked, {
+          min: 0, max: 128, rawVal: plRawVal,
+          displayFn: (v) => v >= 128 ? (kitDef !== null ? kitDef : '?') : v,
+          onChange: (v) => {
+            writePlock(t, ptCapture, s, v >= 128 ? 0xFF : v);
+            refreshAfterEdit();
+          },
+        }));
       }
 
       return makeSec(secKey, body);
@@ -1794,17 +1949,63 @@
       return sec;
     }
 
-    function makeParamRow(lbl, val, locked) {
+    function makeParamRow(lbl, val, locked, opts) {
       const row = document.createElement('div');
       row.className = 'sp-param';
       const l = document.createElement('span');
       l.className = 'sp-lbl';
       l.textContent = lbl;
       const v = document.createElement('span');
-      v.className = 'sp-val' + (locked ? ' locked' : '');
+      v.className = 'sp-val' + (locked ? ' locked' : '')
+                  + (opts ? ' editable' : '');
       v.textContent = val;
       row.appendChild(l);
       row.appendChild(v);
+
+      if (opts) {
+        const { min, max, rawVal, onChange, displayFn } = opts;
+
+        // ── Scroll-wheel: inc/dec value ──
+        v.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          const step = e.shiftKey ? 10 : 1;
+          const dir  = e.deltaY < 0 ? 1 : -1;
+          const nv   = Math.max(min, Math.min(max, rawVal + dir * step));
+          if (nv !== rawVal) onChange(nv);
+        }, { passive: false });
+
+        // ── Click: inline input ──
+        v.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (v.querySelector('input')) return;
+          const inp = document.createElement('input');
+          inp.type  = 'number';
+          inp.min   = min;
+          inp.max   = max;
+          inp.value = rawVal;
+          v.textContent = '';
+          v.appendChild(inp);
+          inp.select();
+          inp.focus();
+
+          const commit = () => {
+            const parsed = parseInt(inp.value, 10);
+            if (!isNaN(parsed)) {
+              const clamped = Math.max(min, Math.min(max, parsed));
+              if (clamped !== rawVal) { onChange(clamped); return; }
+            }
+            // Restore display if unchanged or invalid
+            v.textContent = displayFn ? displayFn(rawVal) : val;
+          };
+          inp.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter')  { ke.preventDefault(); commit(); }
+            if (ke.key === 'Escape') { ke.preventDefault(); v.textContent = val; }
+            ke.stopPropagation();
+          });
+          inp.addEventListener('blur', commit);
+        });
+      }
+
       return row;
     }
 
