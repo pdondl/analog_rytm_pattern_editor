@@ -1999,6 +1999,21 @@
         const { min, max, rawVal, onChange, displayFn, initVal, snap } = opts;
         const startVal = initVal !== undefined ? initVal : rawVal;
         const hasSnap  = snap !== undefined;
+        const snapR    = 2;  // snap dead-band radius in slider positions
+
+        // Snap mapping: slider range is extended by 2×snapR so all values
+        // remain reachable. Positions within ±snapR of the snap point map
+        // to the snap value; positions outside are shifted to fill the gap.
+        const valToSlider = (val) => {
+          if (!hasSnap) return val;
+          if (val === snap) return snap;
+          return val > snap ? val + snapR : val - snapR;
+        };
+        const sliderToVal = (sv) => {
+          if (!hasSnap) return sv;
+          if (Math.abs(sv - snap) <= snapR) return snap;
+          return sv > snap ? sv - snapR : sv + snapR;
+        };
 
         // ── Click: expand to slider + number input ──
         v.addEventListener('click', (e) => {
@@ -2008,11 +2023,14 @@
           const editor = document.createElement('div');
           editor.className = 'sp-editor';
 
+          const sMin = hasSnap ? min - snapR : min;
+          const sMax = hasSnap ? max + snapR : max;
+
           const slider = document.createElement('input');
           slider.type = 'range';
-          slider.min  = min;
-          slider.max  = max;
-          slider.value = startVal;
+          slider.min  = sMin;
+          slider.max  = sMax;
+          slider.value = valToSlider(startVal);
 
           const numInp = document.createElement('input');
           numInp.type  = 'number';
@@ -2041,18 +2059,18 @@
 
           // Slider drag → update number + display in real-time
           slider.addEventListener('input', () => {
-            let sv = parseInt(slider.value, 10);
-            if (hasSnap && Math.abs(sv - snap) <= 1) { sv = snap; slider.value = sv; }
-            numInp.value = sv;
-            updateDisp(sv);
+            const val = sliderToVal(parseInt(slider.value, 10));
+            numInp.value = val;
+            updateDisp(val);
           });
 
           // Number input → update slider + display
           numInp.addEventListener('input', () => {
             const nv = parseInt(numInp.value, 10);
             if (!isNaN(nv)) {
-              slider.value = Math.max(min, Math.min(max, nv));
-              updateDisp(Math.max(min, Math.min(max, nv)));
+              const clamped = Math.max(min, Math.min(max, nv));
+              slider.value = valToSlider(clamped);
+              updateDisp(clamped);
             }
           });
 
@@ -2076,7 +2094,7 @@
 
           // Slider release → sync number input and commit
           slider.addEventListener('pointerup', () => {
-            numInp.value = parseInt(slider.value, 10);
+            numInp.value = sliderToVal(parseInt(slider.value, 10));
             commit();
           });
 
