@@ -163,38 +163,56 @@
       font-size: 0.72em;
       color: #555;
     }
-    .track-defaults {
+    .track-settings-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 8px 12px;
+      margin-bottom: 6px;
+      font-size: 0.8em;
       display: flex;
-      gap: 3px;
-      font-size: 0.75em;
-      color: #555;
-      letter-spacing: 0;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
     }
-    .track-defaults .td-val {
+    .track-settings-panel .ts-title {
+      color: var(--accent);
+      font-weight: bold;
+      letter-spacing: 1px;
+      min-width: 68px;
+    }
+    .track-settings-panel .ts-group {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .track-settings-panel .ts-lbl {
+      color: var(--muted);
+      font-size: 0.85em;
+    }
+    .track-settings-panel .ts-val {
+      color: var(--fg);
       cursor: pointer;
-      padding: 0 1px;
+      padding: 1px 4px;
       border-radius: 1px;
     }
-    .track-defaults .td-val:hover { color: var(--fg); }
-    .track-defaults .td-input {
-      width: 30px; background: #0a0a0a; border: 1px solid var(--accent);
+    .track-settings-panel .ts-val:hover {
+      background: rgba(255,255,255,0.08);
+    }
+    .track-settings-panel .ts-input {
+      width: 40px; background: #0a0a0a; border: 1px solid var(--accent);
       color: var(--fg); font-family: inherit; font-size: 1em;
-      padding: 0 2px; outline: none; border-radius: 1px;
+      padding: 1px 3px; outline: none; border-radius: 1px;
     }
-    .track-flags {
-      display: flex;
-      gap: 2px;
-      font-size: 0.68em;
-      letter-spacing: 0;
-    }
-    .track-flags .tf {
+    .track-settings-panel .ts-flag {
       cursor: pointer;
-      padding: 0 1px;
+      padding: 1px 3px;
       border-radius: 1px;
-      color: #333;
+      color: #555;
+      font-size: 0.9em;
     }
-    .track-flags .tf.on { color: #e05a00; }
-    .track-flags .tf:hover { color: var(--fg); }
+    .track-settings-panel .ts-flag.on { color: #e05a00; }
+    .track-settings-panel .ts-flag:hover { color: var(--fg); }
     .track-steps {
       display: flex;
       gap: var(--group-gap);
@@ -707,6 +725,116 @@
     // soundOff is the byte offset within ar_sound_t (s_u16_t fields: read the
     // first/hi byte which carries the 0-127 value; lo byte is always 0).
 
+    // ─── Enum / display lookup tables ──────────────────────────────────────
+
+    const FLT_TYPE_NAMES  = ['LP2','LP1','BP','HP1','HP2','BS','PK'];
+    const LFO_WAV_NAMES   = ['TRI','SIN','SQR','SAW','EXP','RMP','RND'];
+    const LFO_TRIG_NAMES  = ['FRE','TRG','HLD','ONE','HLF'];
+    const LFO_MUL_NAMES   = ['1','2','4','8','16','32','64','128','256','512','1k','2k'];
+
+    // LFO destination names indexed by internal dest ID (0-41)
+    const LFO_DEST_NAMES = [];
+    LFO_DEST_NAMES[0]  = 'P1'; LFO_DEST_NAMES[1]  = 'P2'; LFO_DEST_NAMES[2]  = 'P3';
+    LFO_DEST_NAMES[3]  = 'P4'; LFO_DEST_NAMES[4]  = 'P5'; LFO_DEST_NAMES[5]  = 'P6';
+    LFO_DEST_NAMES[6]  = 'P7'; LFO_DEST_NAMES[7]  = 'P8';
+    LFO_DEST_NAMES[8]  = 'S:TUN'; LFO_DEST_NAMES[9]  = 'S:FIN';
+    LFO_DEST_NAMES[10] = 'S:SMP'; LFO_DEST_NAMES[11] = 'S:BR';
+    LFO_DEST_NAMES[12] = 'S:STA'; LFO_DEST_NAMES[13] = 'S:END';
+    LFO_DEST_NAMES[14] = 'S:LOP'; LFO_DEST_NAMES[15] = 'S:LEV';
+    LFO_DEST_NAMES[16] = 'F:ATK'; LFO_DEST_NAMES[17] = 'F:SUS';
+    LFO_DEST_NAMES[18] = 'F:DEC'; LFO_DEST_NAMES[19] = 'F:REL';
+    LFO_DEST_NAMES[20] = 'F:FRQ'; LFO_DEST_NAMES[21] = 'F:RES';
+    LFO_DEST_NAMES[23] = 'F:ENV';
+    LFO_DEST_NAMES[24] = 'A:ATK'; LFO_DEST_NAMES[25] = 'A:HLD';
+    LFO_DEST_NAMES[26] = 'A:DEC'; LFO_DEST_NAMES[27] = 'A:OVR';
+    LFO_DEST_NAMES[28] = 'A:DLY'; LFO_DEST_NAMES[29] = 'A:REV';
+    LFO_DEST_NAMES[30] = 'A:PAN'; LFO_DEST_NAMES[31] = 'A:VOL';
+    LFO_DEST_NAMES[32] = 'A:ACC';
+    LFO_DEST_NAMES[41] = 'OFF';
+
+    // Valid LFO destinations in hardware UI order (from ar_sound_lfo_dest_ids_ui)
+    const LFO_DEST_UI_IDS = [
+      41, 0, 1, 2, 3, 4, 5, 6, 7,        // OFF, P1-P8
+      8, 9, 10, 11, 12, 13, 14, 15,       // SMP params
+      23, 16, 18, 17, 19, 20, 21,          // FLT params (ENV, ATK, DEC, SUS, REL, FRQ, RES)
+      24, 25, 26, 27, 31, 30, 32, 28, 29  // AMP params (ATK, HLD, DEC, OVR, VOL, PAN, ACC, DLY, REV)
+    ];
+    // Reverse map: internal ID → UI index
+    const LFO_DEST_ID_TO_UI = new Map();
+    LFO_DEST_UI_IDS.forEach((id, idx) => LFO_DEST_ID_TO_UI.set(id, idx));
+
+    function lfoDestName(v, machineType) {
+      // For SYN destinations (0-7), use machine-specific param names
+      if (v <= 7 && machineType !== null && machineType !== undefined) {
+        const ml = MACHINE_PARAM_NAMES[v]?.[machineType];
+        if (ml && ml !== '-') return ml;
+      }
+      return LFO_DEST_NAMES[v] ?? String(v);
+    }
+
+    // Machine-specific bipolar params (64 = center/zero)
+    // machineType → Set of plock indices (0-7) that are bipolar
+    const MACHINE_BIPOLAR = {
+      3:  new Set([7]),          // SD Classic: P8=BAL
+      5:  new Set([3,4,5]),      // RS Classic: P4=BAL, P5=T2, P6=SYM
+      8:  new Set([7]),          // XT Classic: P8=TON
+      9:  new Set([3]),          // CH Classic: P4=COL
+      10: new Set([3]),          // OH Classic: P4=COL
+      11: new Set([3,4]),        // CY Classic: P4=COL, P5=TON
+      12: new Set([4,5]),        // CB Classic: P5=PW1, P6=PW2
+      13: new Set([7]),          // BD FM: P8=FMT
+      14: new Set([3,7]),        // SD FM: P4=FMT, P8=FMT
+      15: new Set([7]),          // UT Noise: P8=SWD
+      19: new Set([3]),          // CY Metallic: P4=TON
+      20: new Set([4,5]),        // CB Metallic: P5=PW1, P6=PW2
+      24: new Set([3]),          // HH Basic: P4=TON
+      28: new Set([5,6]),        // SY Dual VCO: P6=BAL, P7=BND
+      29: new Set([3,4,5]),      // SY Chip: P4=OF2, P5=OF3, P6=OF4
+      32: new Set([3,7]),        // SY Raw: P4=DET, P8=BAL
+    };
+
+    // Machines where TUN range is limited to -32..+32 (raw 32-96) instead of full -64..+63
+    // BD, SD, RS machines (except RS Classic which has T1 not TUN)
+    const MACHINE_TUN_LIMITED = new Set([
+      0, 1,           // BD Hard, BD Classic
+      2, 3,           // SD Hard, SD Classic
+      4,              // RS Hard
+      13, 14,         // BD FM, SD FM
+      21, 22, 23,     // BD Plastic, BD Silky, SD Natural
+      26,             // BD Sharp
+      30, 31,         // BD Acoustic, SD Acoustic
+    ]);
+
+    // Machine-specific enum params
+    // machineType → { plockIdx: string[] }
+    const MACHINE_ENUMS = {
+      25: { 3: ['A','B','C','D'] },  // CY Ride: P4=TYP
+      26: { 6: ['sinA','sinB','asinA','asinB','triA','triB','ssawA','ssawB','sawA','sawB','sqrA','sqrB'] },  // BD Sharp: P7=WAV
+      29: {
+        6: ['sin','asin','tri','ssaw','saw','sqr','noise',
+            'anm1','anm2','anm3','anm4','anm5','pwm+','pwm-',
+            'triB','+tri','tri+','triX','sawB','+saw','saw+','sawX',
+            'sqrB','+sqr','sqr+','sqrX','tbl1','tbl2','tbl3',
+            ...Array.from({length: 99}, (_, i) => 'p' + (i + 1) + '%')],  // SY Chip: P7=WAV
+        7: ['128T','128','64T','128d','64','32T','64d','32','16T','32d','16','8T',
+            '16d','8','4T','8d','4','2T','4d','2','1T','2d','1','1d',
+            '1.0Hz','1.56Hz','1.88Hz','2Hz','3.13Hz','3.75Hz','4Hz','5Hz',
+            '6.25Hz','7.5Hz','10Hz','12.5Hz','15Hz','20Hz','25Hz','30Hz',
+            '40Hz','50Hz','60Hz','75Hz','100Hz','120Hz','150Hz','180Hz',
+            '200Hz','240Hz','250Hz','300Hz','350Hz','360Hz','400Hz','420Hz',
+            '480Hz','240.5Hz','200.5Hz','150.5Hz','120.5Hz','100.5Hz',
+            '60.5Hz','50.5Hz','30.5Hz','25.5Hz'],  // SY Chip: P8=SPD
+      },
+      30: { 6: ['sinA','sinB','asinA','asinB','triA','triB','ssawA','ssawB','sawA','sawB','sqrA','sqrB'] },  // BD Acoustic: P7=WAV
+      32: {
+        5: ['sin','asin','tri','ssaw','asaw','saw','ring'],      // SY Raw: P6=WAV1
+        6: ['sineA','ssawA','sineB','ssawB'],                    // SY Raw: P7=WAV2
+      },
+    };
+
+    // ─── Plock parameter info ─────────────────────────────────────────────────
+    // Maps plock_type → { section, label, soundOff, [bipolar], [enum], [pan], [inf127], [lfoDest] }
+
     const PLOCK_INFO = {
       0x00: { sec:'SRC',  lbl:'P1',   sndOff:0x1C },
       0x01: { sec:'SRC',  lbl:'P2',   sndOff:0x1E },
@@ -716,39 +844,39 @@
       0x05: { sec:'SRC',  lbl:'P6',   sndOff:0x26 },
       0x06: { sec:'SRC',  lbl:'P7',   sndOff:0x28 },
       0x07: { sec:'SRC',  lbl:'P8',   sndOff:0x2A },
-      0x08: { sec:'SMPL', lbl:'TUN',  sndOff:0x2C },
-      0x09: { sec:'SMPL', lbl:'FIN',  sndOff:0x2E },
+      0x08: { sec:'SMPL', lbl:'TUN',  sndOff:0x2C, bipolar:true },
+      0x09: { sec:'SMPL', lbl:'FIN',  sndOff:0x2E, bipolar:true },
       0x0A: { sec:'SMPL', lbl:'SMP',  sndOff:0x30 },
       0x0B: { sec:'SMPL', lbl:'BR',   sndOff:0x32 },
       0x0C: { sec:'SMPL', lbl:'STA',  sndOff:0x34 },
       0x0D: { sec:'SMPL', lbl:'END',  sndOff:0x36 },
-      0x0E: { sec:'SMPL', lbl:'LOP',  sndOff:0x38 },
+      0x0E: { sec:'SMPL', lbl:'LOP',  sndOff:0x38, enum:['OFF','ON'] },
       0x0F: { sec:'SMPL', lbl:'LEV',  sndOff:0x3A },
       0x10: { sec:'FLTR', lbl:'ATK',  sndOff:0x3C },
       0x11: { sec:'FLTR', lbl:'SUS',  sndOff:0x3E },
-      0x12: { sec:'FLTR', lbl:'DEC',  sndOff:0x40 },
-      0x13: { sec:'FLTR', lbl:'REL',  sndOff:0x42 },
+      0x12: { sec:'FLTR', lbl:'DEC',  sndOff:0x40, inf127:true },
+      0x13: { sec:'FLTR', lbl:'REL',  sndOff:0x42, inf127:true },
       0x14: { sec:'FLTR', lbl:'FRQ',  sndOff:0x44 },
       0x15: { sec:'FLTR', lbl:'RES',  sndOff:0x46 },
-      0x16: { sec:'FLTR', lbl:'TYP',  sndOff:0x48 },
-      0x17: { sec:'FLTR', lbl:'ENV',  sndOff:0x4A },
+      0x16: { sec:'FLTR', lbl:'TYP',  sndOff:0x48, enum:FLT_TYPE_NAMES },
+      0x17: { sec:'FLTR', lbl:'ENV',  sndOff:0x4A, bipolar:true },
       0x18: { sec:'AMP',  lbl:'ATK',  sndOff:0x4C },
       0x19: { sec:'AMP',  lbl:'HLD',  sndOff:0x4E },
-      0x1A: { sec:'AMP',  lbl:'DEC',  sndOff:0x50 },
+      0x1A: { sec:'AMP',  lbl:'DEC',  sndOff:0x50, inf127:true },
       0x1B: { sec:'AMP',  lbl:'OVR',  sndOff:0x52 },
       0x1C: { sec:'AMP',  lbl:'DEL',  sndOff:0x54 },
       0x1D: { sec:'AMP',  lbl:'REV',  sndOff:0x56 },
-      0x1E: { sec:'AMP',  lbl:'PAN',  sndOff:0x58 },
+      0x1E: { sec:'AMP',  lbl:'PAN',  sndOff:0x58, pan:true },
       0x1F: { sec:'AMP',  lbl:'VOL',  sndOff:0x5A },
       // 0x20: unknown — skipped
-      0x21: { sec:'LFO',  lbl:'SPD',  sndOff:0x5E },
-      0x22: { sec:'LFO',  lbl:'MUL',  sndOff:0x60 },
-      0x23: { sec:'LFO',  lbl:'FAD',  sndOff:0x62 },
-      0x24: { sec:'LFO',  lbl:'DST',  sndOff:0x64 },
-      0x25: { sec:'LFO',  lbl:'WAV',  sndOff:0x66 },
-      0x26: { sec:'LFO',  lbl:'SPH',  sndOff:0x68 },
-      0x27: { sec:'LFO',  lbl:'MOD',  sndOff:0x6A },
-      0x28: { sec:'LFO',  lbl:'DEP',  sndOff:0x6C },
+      0x21: { sec:'LFO',  lbl:'SPD',  sndOff:0x5E, bipolar:true },
+      0x22: { sec:'LFO',  lbl:'MUL',  sndOff:0x60, enum:LFO_MUL_NAMES },
+      0x23: { sec:'LFO',  lbl:'FAD',  sndOff:0x62, bipolar:true },
+      0x24: { sec:'LFO',  lbl:'DST',  sndOff:0x64, lfoDest:true },
+      0x25: { sec:'LFO',  lbl:'WAV',  sndOff:0x66, enum:LFO_WAV_NAMES },
+      0x26: { sec:'LFO',  lbl:'SPH',  sndOff:0x68, lfoPhase:true },
+      0x27: { sec:'LFO',  lbl:'MOD',  sndOff:0x6A, enum:LFO_TRIG_NAMES },
+      0x28: { sec:'LFO',  lbl:'DEP',  sndOff:0x6C, bipolar:true },
     };
 
     const SECTION_KEYS = ['SRC','SMPL','FLTR','AMP','LFO'];
@@ -787,8 +915,10 @@
     let lastKitSyx  = null;    // original kit sysex bytes (for saving)
     let lastSyxMeta = null;    // { devId, dumpId, verHi, verLo, objNr }
     let plockValues = null;    // plockValues[track] = Map<plockType, Uint8Array[64]>
+    let plockFineValues = null; // plockFineValues[track] = Map<plockType, Uint8Array[64]> (0x80 companions)
     let stepPage    = 0;
     let openPanel   = null;    // { t, s, el }
+    let openTrackPanel = null; // { t, el }
     let soundPool    = new Map();      // slot (0-127) → decoded raw sound bytes
     let soundPoolSyx = new Map();      // slot (0-127) → original sysex bytes (for saving)
     let pendingSoundReqs = new Set();  // slot numbers awaiting response
@@ -1278,15 +1408,35 @@
 
     function parsePlocks(raw) {
       const values = Array.from({length: AR_NUM_TRACKS}, () => new Map());
+      const fine   = Array.from({length: AR_NUM_TRACKS}, () => new Map());
       const map    = Array.from({length: AR_NUM_TRACKS}, () => new Uint8Array(AR_NUM_STEPS));
 
       const end = PLOCK_SEQS_BASE + NUM_PLOCK_SEQS * PLOCK_SEQ_SZ;
       if (raw.length >= end) {
+        let lastCoarseType = -1, lastCoarseTrk = -1;
+
         for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
           const base   = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
           const plType = raw[base];
           const trkNr  = raw[base + 1];
-          if (plType === 0xFF || trkNr === 0xFF || trkNr >= AR_NUM_TRACKS) continue;
+
+          // Fine companion: type=0x80, track=0x80 — pair with preceding coarse
+          if (plType === 0x80 && trkNr === 0x80 && lastCoarseTrk >= 0) {
+            let arr = fine[lastCoarseTrk].get(lastCoarseType);
+            if (!arr) { arr = new Uint8Array(AR_NUM_STEPS).fill(0xFF); fine[lastCoarseTrk].set(lastCoarseType, arr); }
+            for (let s = 0; s < AR_NUM_STEPS; s++) {
+              const v = raw[base + 2 + s];
+              if (v !== 0xFF) arr[s] = v;
+            }
+            continue;
+          }
+
+          if (plType === 0xFF || trkNr === 0xFF || trkNr >= AR_NUM_TRACKS) {
+            lastCoarseType = -1; lastCoarseTrk = -1;
+            continue;
+          }
+
+          lastCoarseType = plType; lastCoarseTrk = trkNr;
 
           let arr = values[trkNr].get(plType);
           if (!arr) { arr = new Uint8Array(AR_NUM_STEPS).fill(0xFF); values[trkNr].set(plType, arr); }
@@ -1299,6 +1449,7 @@
       }
 
       plockValues = values;
+      plockFineValues = fine;
       return map;
     }
 
@@ -1306,6 +1457,7 @@
 
     function renderGrid(raw, page) {
       closeStepPanel();
+      closeTrackPanel();
       gridEl.innerHTML = '';
 
       const GROUPS    = 2;
@@ -1354,8 +1506,6 @@
         const trackBase = 4 + t * TRACK_V5_SZ;
         const trigBits  = raw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
         const numSteps  = raw[trackBase + NUM_STEPS_OFFSET];
-        const speedByte = raw[trackBase + TRACK_SPEED_OFFSET];
-        const speedStr  = TRACK_SPEED_LABELS[speedByte & 0x07] || '1x';
 
         const row = document.createElement('div');
         row.className = 'track-row';
@@ -1366,11 +1516,7 @@
         label.className = 'track-label';
         const nameSpan = document.createElement('span');
         nameSpan.textContent = TRACK_NAMES[t];
-        const metaSpan = document.createElement('span');
-        metaSpan.className = 'track-meta';
-        metaSpan.textContent = speedStr + '\u00B7' + numSteps;
         label.appendChild(nameSpan);
-        label.appendChild(metaSpan);
         const machType = getTrackMachineType(t);
         if (machType !== null) {
           const machSpan = document.createElement('span');
@@ -1379,97 +1525,16 @@
           label.appendChild(machSpan);
         }
 
-        // ── Track defaults (note, velocity, length) ──
-        const defNote = raw[trackBase + DEFAULT_NOTE_OFFSET];
-        const defVelo = raw[trackBase + DEFAULT_VELOCITY_OFFSET];
-        const defLen  = raw[trackBase + DEFAULT_NOTE_LEN_OFFSET];
-
-        const defsRow = document.createElement('span');
-        defsRow.className = 'track-defaults';
-
-        const makeDefVal = (text, editVal, min, max, onChange) => {
-          const sp = document.createElement('span');
-          sp.className = 'td-val';
-          sp.textContent = text;
-          sp.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (sp.querySelector('input')) return;
-            const inp = document.createElement('input');
-            inp.type = 'number';
-            inp.className = 'td-input';
-            inp.min = min; inp.max = max;
-            inp.value = editVal;
-            sp.textContent = '';
-            sp.appendChild(inp);
-            inp.focus();
-            inp.select();
-            let done = false;
-            const commit = () => {
-              if (done) return;
-              done = true;
-              const n = parseInt(inp.value, 10);
-              if (!isNaN(n)) onChange(Math.max(min, Math.min(max, n)));
-              refreshAfterEdit();
-            };
-            const cancel = () => {
-              if (done) return;
-              done = true;
-              sp.textContent = text;
-            };
-            inp.addEventListener('keydown', (ke) => {
-              if (ke.key === 'Enter')  { ke.preventDefault(); commit(); }
-              if (ke.key === 'Escape') { ke.preventDefault(); cancel(); }
-              ke.stopPropagation();
-            });
-            inp.addEventListener('blur', () => {
-              setTimeout(() => { if (!done) commit(); }, 0);
-            });
-          });
-          return sp;
-        };
-
-        defsRow.appendChild(makeDefVal(
-          midiNoteToName(defNote), defNote, 0, 127,
-          (v) => { raw[trackBase + DEFAULT_NOTE_OFFSET] = v; }
-        ));
-        defsRow.appendChild(makeDefVal(
-          String(defVelo), defVelo, 0, 127,
-          (v) => { raw[trackBase + DEFAULT_VELOCITY_OFFSET] = v; }
-        ));
-        defsRow.appendChild(makeDefVal(
-          noteLenStr(defLen), defLen, 0, 127,
-          (v) => { raw[trackBase + DEFAULT_NOTE_LEN_OFFSET] = v; }
-        ));
-        label.appendChild(defsRow);
-
-        // ── Default trig flags (SYN/SMP/ENV/LFO) ──
-        const defFlagsHi = raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET];
-        const defFlagsLo = raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET + 1];
-        const defFlags   = (defFlagsHi << 8) | defFlagsLo;
-
-        const flagsRow = document.createElement('span');
-        flagsRow.className = 'track-flags';
-        const defFlagDefs = [
-          { lbl: 'SY', name: 'SYN', bit: AR_TRIG_SYN_PL_SW },
-          { lbl: 'SM', name: 'SMP', bit: AR_TRIG_SMP_PL_SW },
-          { lbl: 'EN', name: 'ENV', bit: AR_TRIG_ENV_PL_SW },
-          { lbl: 'LF', name: 'LFO', bit: AR_TRIG_LFO_PL_SW },
-        ];
-        for (const f of defFlagDefs) {
-          const el = document.createElement('span');
-          el.className = 'tf' + ((defFlags & f.bit) ? ' on' : '');
-          el.textContent = f.lbl;
-          el.title = 'Default ' + f.name + ((defFlags & f.bit) ? ' ON' : ' OFF');
-          el.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const newFlags = defFlags ^ f.bit;
-            raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET]     = (newFlags >> 8) & 0xFF;
-            raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET + 1] = newFlags & 0xFF;
-            refreshAfterEdit();
-          });
-          flagsRow.appendChild(el);
-        }
-        label.appendChild(flagsRow);
+        // Click label → open/close track settings panel
+        label.style.cursor = 'pointer';
+        label.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (openTrackPanel && openTrackPanel.t === t) {
+            closeTrackPanel();
+          } else {
+            openTrackSettingsPanel(t);
+          }
+        });
 
         row.appendChild(label);
 
@@ -1728,6 +1793,168 @@
       openPanel = null;
     }
 
+    // ─── Track settings panel ───────────────────────────────────────────────
+
+    function openTrackSettingsPanel(t) {
+      closeTrackPanel();
+      const trackRow = gridEl.querySelector(`.track-row[data-track="${t}"]`);
+      if (!trackRow) return;
+      const panel = buildTrackSettingsPanel(t);
+      gridEl.insertBefore(panel, trackRow);
+      openTrackPanel = { t, el: panel };
+    }
+
+    function closeTrackPanel() {
+      if (!openTrackPanel) return;
+      openTrackPanel.el.remove();
+      openTrackPanel = null;
+    }
+
+    function buildTrackSettingsPanel(t) {
+      if (!lastRaw) return document.createElement('div');
+      const trackBase = 4 + t * TRACK_V5_SZ;
+      const raw = lastRaw;
+
+      const panel = document.createElement('div');
+      panel.className = 'track-settings-panel';
+
+      // Title
+      const title = document.createElement('span');
+      title.className = 'ts-title';
+      const machType = getTrackMachineType(t);
+      title.textContent = TRACK_NAMES[t] +
+        (machType !== null ? ' · ' + MACHINE_NAMES[machType] : '');
+      panel.appendChild(title);
+
+      // Inline editable value helper
+      const addVal = (lbl, displayText, editVal, width, onCommit) => {
+        const grp = document.createElement('span');
+        grp.className = 'ts-group';
+        const label = document.createElement('span');
+        label.className = 'ts-lbl';
+        label.textContent = lbl;
+        const v = document.createElement('span');
+        v.className = 'ts-val';
+        v.textContent = displayText;
+        grp.appendChild(label);
+        grp.appendChild(v);
+        panel.appendChild(grp);
+
+        v.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (v.querySelector('input')) return;
+          const inp = document.createElement('input');
+          inp.type = 'number';
+          inp.className = 'ts-input';
+          inp.style.width = width || '40px';
+          inp.value = editVal;
+          v.textContent = '';
+          v.appendChild(inp);
+          inp.focus();
+          inp.select();
+          let done = false;
+          const commit = () => {
+            if (done) return;
+            done = true;
+            onCommit(inp.value);
+          };
+          const cancel = () => {
+            if (done) return;
+            done = true;
+            v.textContent = displayText;
+          };
+          inp.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter')  { ke.preventDefault(); commit(); }
+            if (ke.key === 'Escape') { ke.preventDefault(); cancel(); }
+            ke.stopPropagation();
+          });
+          inp.addEventListener('blur', () => {
+            setTimeout(() => { if (!done) commit(); }, 0);
+          });
+        });
+      };
+
+      // Speed (editable: 0-6 maps to TRACK_SPEED_LABELS)
+      const speedByte = raw[trackBase + TRACK_SPEED_OFFSET];
+      const speedIdx  = speedByte & 0x07;
+      const speedStr  = TRACK_SPEED_LABELS[speedIdx] || '1x';
+      addVal('Speed', speedStr, speedIdx, '40px', (val) => {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n >= 0 && n < TRACK_SPEED_LABELS.length) {
+          raw[trackBase + TRACK_SPEED_OFFSET] = (speedByte & 0xF8) | (n & 0x07);
+        }
+        refreshAfterEdit();
+      });
+
+      // Steps (editable: 1-64)
+      const numSteps = raw[trackBase + NUM_STEPS_OFFSET];
+      addVal('Steps', String(numSteps), numSteps, '40px', (val) => {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n >= 1 && n <= 64) raw[trackBase + NUM_STEPS_OFFSET] = n;
+        refreshAfterEdit();
+      });
+
+      // Default Note
+      const defNote = raw[trackBase + DEFAULT_NOTE_OFFSET];
+      addVal('Note', midiNoteToName(defNote), defNote, '40px', (val) => {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n >= 0 && n <= 127) raw[trackBase + DEFAULT_NOTE_OFFSET] = n;
+        refreshAfterEdit();
+      });
+
+      // Default Velocity
+      const defVelo = raw[trackBase + DEFAULT_VELOCITY_OFFSET];
+      addVal('Vel', String(defVelo), defVelo, '40px', (val) => {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n >= 0 && n <= 127) raw[trackBase + DEFAULT_VELOCITY_OFFSET] = n;
+        refreshAfterEdit();
+      });
+
+      // Default Length
+      const defLen = raw[trackBase + DEFAULT_NOTE_LEN_OFFSET];
+      addVal('Len', noteLenStr(defLen), defLen, '40px', (val) => {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n >= 0 && n <= 127) raw[trackBase + DEFAULT_NOTE_LEN_OFFSET] = n;
+        refreshAfterEdit();
+      });
+
+      // Default Trig Flags
+      const defFlagsHi = raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET];
+      const defFlagsLo = raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET + 1];
+      const defFlags   = (defFlagsHi << 8) | defFlagsLo;
+
+      const flagGrp = document.createElement('span');
+      flagGrp.className = 'ts-group';
+      const flagLbl = document.createElement('span');
+      flagLbl.className = 'ts-lbl';
+      flagLbl.textContent = 'Flags';
+      flagGrp.appendChild(flagLbl);
+
+      const flagDefs = [
+        { lbl: 'SYN', bit: AR_TRIG_SYN_PL_SW },
+        { lbl: 'SMP', bit: AR_TRIG_SMP_PL_SW },
+        { lbl: 'ENV', bit: AR_TRIG_ENV_PL_SW },
+        { lbl: 'LFO', bit: AR_TRIG_LFO_PL_SW },
+      ];
+      for (const f of flagDefs) {
+        const el = document.createElement('span');
+        el.className = 'ts-flag' + ((defFlags & f.bit) ? ' on' : '');
+        el.textContent = f.lbl;
+        el.title = 'Default ' + f.lbl + ((defFlags & f.bit) ? ' ON' : ' OFF');
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const nf = defFlags ^ f.bit;
+          raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET]     = (nf >> 8) & 0xFF;
+          raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET + 1] = nf & 0xFF;
+          refreshAfterEdit();
+        });
+        flagGrp.appendChild(el);
+      }
+      panel.appendChild(flagGrp);
+
+      return panel;
+    }
+
     function buildStepPanel(t, s) {
       const trackBase = 4 + t * TRACK_V5_SZ;
       const trigBits  = lastRaw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
@@ -1931,9 +2158,11 @@
 
     function refreshAfterEdit() {
       const had = openPanel ? { t: openPanel.t, s: openPanel.s } : null;
+      const hadTrack = openTrackPanel ? { t: openTrackPanel.t } : null;
       renderMeta();
       renderGrid(lastRaw, stepPage);
       if (had) openStepPanel(had.t, had.s);
+      if (hadTrack) openTrackSettingsPanel(hadTrack.t);
     }
 
     function toggleTrigFlag(t, s, bit) {
@@ -2071,8 +2300,8 @@
       const microRaw    = lastRaw[trackBase + MICRO_TIMING_OFFSET + s];
       const microVal    = microRaw & 0x3F;
       const microSigned = (microVal & 0x20) ? microVal - 64 : microVal;
-      const utimeStr    = (microSigned > 0 ? '+' : '') + microSigned;
-      const utimeDispFn = (v) => (v > 0 ? '+' : '') + v;
+      const utimeStr    = utimeFrac(microSigned);
+      const utimeDispFn = (v) => utimeFrac(v);
       body.appendChild(makeParamRow('UTIME', utimeStr, microSigned !== 0, {
         min: -23, max: 23, rawVal: microSigned, displayFn: utimeDispFn, snap: 0,
         onChange: (v) => {
@@ -2195,6 +2424,60 @@
       // else: no slot found and val is 0xFF — nothing to do
     }
 
+    // Clear the 0x80 fine companion for a coarse plock on a given step.
+    // Must be called BEFORE writePlock if the coarse slot may be deallocated.
+    function clearPlockFine(t, pt, s) {
+      if (!lastRaw) return;
+      for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
+        const base = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
+        if (lastRaw[base] === pt && lastRaw[base + 1] === t) {
+          // Found coarse slot; check if next slot is a 0x80 fine companion
+          const nextSi = si + 1;
+          if (nextSi < NUM_PLOCK_SEQS) {
+            const nb = PLOCK_SEQS_BASE + nextSi * PLOCK_SEQ_SZ;
+            if (lastRaw[nb] === 0x80 && lastRaw[nb + 1] === 0x80) {
+              lastRaw[nb + 2 + s] = 0xFF;
+              let allEmpty = true;
+              for (let i = 0; i < AR_NUM_STEPS; i++) {
+                if (lastRaw[nb + 2 + i] !== 0xFF) { allEmpty = false; break; }
+              }
+              if (allEmpty) { lastRaw[nb] = 0xFF; lastRaw[nb + 1] = 0xFF; }
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    // Write a fine value to the 0x80 companion of a coarse plock.
+    // Creates the companion if it doesn't exist (requires adjacent free slot).
+    function writePlockFine(t, pt, s, fineVal) {
+      if (!lastRaw) return;
+      // Find coarse slot
+      for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
+        const base = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
+        if (lastRaw[base] !== pt || lastRaw[base + 1] !== t) continue;
+
+        // Found coarse at si — check si+1 for companion
+        const nextSi = si + 1;
+        if (nextSi >= NUM_PLOCK_SEQS) return;
+        const nb = PLOCK_SEQS_BASE + nextSi * PLOCK_SEQ_SZ;
+
+        if (lastRaw[nb] === 0x80 && lastRaw[nb + 1] === 0x80) {
+          // Companion exists — update step value
+          lastRaw[nb + 2 + s] = fineVal;
+        } else if (lastRaw[nb] === 0xFF) {
+          // Next slot free — create companion
+          lastRaw[nb] = 0x80;
+          lastRaw[nb + 1] = 0x80;
+          for (let i = 0; i < AR_NUM_STEPS; i++) lastRaw[nb + 2 + i] = 0xFF;
+          lastRaw[nb + 2 + s] = fineVal;
+        }
+        // else: next slot occupied by another plock — can't create companion
+        return;
+      }
+    }
+
     // SRC / SMPL / FLTR / AMP / LFO sections
     function buildParamSection(secKey, t, s, machineType, poolSound) {
       const body = document.createElement('div');
@@ -2230,14 +2513,171 @@
         const plRawVal = locked ? plVal : 128;
         const plInitVal = locked ? plVal : (kitDef !== null ? kitDef : 0);
         const ptCapture = pt;  // capture for closure
-        body.appendChild(makeParamRow(lbl, displayVal, locked, {
-          min: 0, max: 128, rawVal: plRawVal, initVal: plInitVal,
-          displayFn: (v) => v >= 128 ? 'TRK' : v,
-          onChange: (v) => {
-            writePlock(t, ptCapture, s, v >= 128 ? 0xFF : v);
+
+        // Determine display function and slider opts from metadata
+        let enumArr = info.enum;
+        let isBipolar = info.bipolar;
+
+        // For SRC params, check machine-specific overrides
+        let tunLimited = false;
+        if (secKey === 'SRC' && pt <= 0x07 && machineType !== null && machineType !== undefined) {
+          if (MACHINE_ENUMS[machineType]?.[pt]) enumArr = MACHINE_ENUMS[machineType][pt];
+          if (MACHINE_BIPOLAR[machineType]?.has(pt)) isBipolar = true;
+          // TUN is always bipolar (64 = center)
+          if (lbl === 'TUN') {
+            isBipolar = true;
+            if (MACHINE_TUN_LIMITED.has(machineType)) tunLimited = true;
+          }
+        }
+
+        let displayFn, pMin = 0, pMax = 128, snap, snapR;
+        if (enumArr) {
+          const enumLen = enumArr.length;
+          displayFn = (v) => v >= enumLen ? 'TRK' : (enumArr[v] ?? String(v));
+          pMax = enumLen;  // 0..(len-1) for values, len=TRK
+        } else if (isBipolar) {
+          if (tunLimited) {
+            // BD/SD/RS TUN: half-step slider (0.50 resolution)
+            // Slider: 0=-32.00, 64=0.00, 128=+32.00, 129=TRK
+            pMin = 0; pMax = 129;
+            displayFn = (v) => {
+              if (v >= 129) return 'TRK';
+              const d = (v - 64) * 0.50;
+              return (d >= 0 ? '+' : '') + d.toFixed(2);
+            };
+            snap = 64; snapR = 3;
+          } else {
+            displayFn = (v) => {
+              if (v >= 128) return 'TRK';
+              const sv = v - 64;
+              return (sv >= 0 ? '+' : '') + sv;
+            };
+            snap = 64; snapR = 3;
+          }
+        } else if (info.pan) {
+          displayFn = (v) => {
+            if (v >= 128) return 'TRK';
+            if (v === 64) return 'C';
+            return v < 64 ? 'L' + (64 - v) : 'R' + (v - 64);
+          };
+          snap = 64; snapR = 3;
+        } else if (info.inf127) {
+          displayFn = (v) => v >= 128 ? 'TRK' : v === 127 ? '\u221E' : String(v);
+        } else if (info.lfoDest) {
+          const destCount = LFO_DEST_UI_IDS.length;  // 33
+          displayFn = (v) => {
+            if (v >= destCount) return 'TRK';
+            const internalId = LFO_DEST_UI_IDS[v];
+            return lfoDestName(internalId, machineType);
+          };
+          pMax = destCount;
+        } else if (info.lfoPhase) {
+          displayFn = (v) => v >= 128 ? 'TRK' : Math.round(v * 360 / 128) + '\u00B0';
+        } else {
+          displayFn = (v) => v >= 128 ? 'TRK' : v;
+        }
+
+        // For lfoDest, convert raw internal IDs to UI indices for the slider
+        let sliderRawVal = plRawVal;
+        let sliderInitVal = plInitVal;
+        if (info.lfoDest) {
+          sliderRawVal  = plRawVal >= 128  ? pMax : (LFO_DEST_ID_TO_UI.get(plRawVal) ?? 0);
+          sliderInitVal = plInitVal >= 128 ? 0    : (LFO_DEST_ID_TO_UI.get(plInitVal) ?? 0);
+        }
+
+        // For tunLimited, convert coarse+fine to half-step slider value
+        if (tunLimited) {
+          const fineArr = plockFineValues && plockFineValues[t].get(pt);
+          const fineVal = (fineArr && locked) ? fineArr[s] : 0xFF;
+          const fine = (fineVal !== 0xFF) ? fineVal : 0;
+          if (locked) {
+            // Convert coarse+fine → half-step: round((coarse-64 + fine/128) / 0.50) + 64
+            sliderRawVal = Math.round(((plVal - 64) + fine / 128) / 0.50) + 64;
+          } else {
+            sliderRawVal = pMax;  // 129 = TRK
+          }
+          // Kit default is coarse only (no fine)
+          const kitCoarse = (plInitVal >= 32 && plInitVal <= 96) ? plInitVal : 64;
+          sliderInitVal = locked ? sliderRawVal : (kitCoarse - 32) * 2;
+        }
+
+        let onChange;
+        if (info.lfoDest) {
+          onChange = (v) => {
+            writePlock(t, ptCapture, s, v >= pMax ? 0xFF : LFO_DEST_UI_IDS[v]);
             refreshAfterEdit();
-          },
-        }));
+          };
+        } else if (tunLimited) {
+          onChange = (v) => {
+            if (v >= 129) {
+              // TRK: clear both coarse and fine
+              clearPlockFine(t, ptCapture, s);
+              writePlock(t, ptCapture, s, 0xFF);
+            } else {
+              // v is in half-step domain (may be float from number input).
+              // Convert to coarse (32-96) + fine (0-127).
+              const halfV  = v / 2;                                   // 0-64
+              const coarse = Math.min(96, 32 + Math.floor(halfV));
+              const fine   = Math.min(127, Math.round((halfV - Math.floor(halfV)) * 128));
+              writePlock(t, ptCapture, s, coarse);
+              if (fine > 0) {
+                writePlockFine(t, ptCapture, s, fine);
+              } else {
+                clearPlockFine(t, ptCapture, s);
+              }
+            }
+            refreshAfterEdit();
+          };
+        } else {
+          onChange = (v) => {
+            writePlock(t, ptCapture, s, v >= pMax ? 0xFF : v);
+            refreshAfterEdit();
+          };
+        }
+
+        const opts = {
+          min: pMin, max: pMax, rawVal: sliderRawVal, initVal: sliderInitVal,
+          displayFn, onChange,
+        };
+        if (snap !== undefined) { opts.snap = snap; opts.snapR = snapR; }
+
+        // For tunLimited: number input shows/accepts display-unit decimals
+        if (tunLimited) {
+          opts.numDisplay = (v) => v >= 129 ? '' : ((v - 64) * 0.50).toFixed(2);
+          opts.numParse = (str) => {
+            const f = parseFloat(str);
+            if (isNaN(f)) return null;
+            // Return float slider value — onChange handles sub-half-step precision
+            return Math.max(-32, Math.min(32, f)) / 0.50 + 64;
+          };
+          opts.numStep = '0.01';
+          opts.numMin = -32;
+          opts.numMax = 32;
+        }
+
+        const showInput = typeof displayVal === 'number'
+          ? (info.lfoDest ? (LFO_DEST_ID_TO_UI.get(displayVal) ?? 0) : displayVal)
+          : displayVal;
+        let showVal;
+
+        // For tunLimited: compute showVal from actual coarse+fine data
+        if (tunLimited) {
+          if (locked) {
+            const fineArr = plockFineValues && plockFineValues[t].get(pt);
+            const fineVal = fineArr ? fineArr[s] : 0xFF;
+            const fine = (fineVal !== 0xFF) ? fineVal : 0;
+            const d = (plVal - 64) + fine / 128;
+            showVal = (d >= 0 ? '+' : '') + d.toFixed(2);
+          } else if (kitDef !== null) {
+            showVal = displayFn((kitDef - 32) * 2);  // coarse-only kit default
+          } else {
+            showVal = '?';
+          }
+        } else {
+          showVal = typeof showInput === 'number' ? displayFn(showInput) : showInput;
+        }
+
+        body.appendChild(makeParamRow(lbl, showVal, locked, opts));
       }
 
       return makeSec(secKey, body);
@@ -2306,11 +2746,13 @@
           slider.max  = sMax;
           slider.value = valToSlider(startVal);
 
+          const hasCustomNum = opts.numDisplay && opts.numParse;
           const numInp = document.createElement('input');
           numInp.type  = 'number';
-          numInp.min   = min;
-          numInp.max   = max;
-          numInp.value = startVal;
+          numInp.min   = hasCustomNum ? (opts.numMin ?? min) : min;
+          numInp.max   = hasCustomNum ? (opts.numMax ?? max) : max;
+          if (hasCustomNum && opts.numStep) numInp.step = opts.numStep;
+          numInp.value = hasCustomNum ? opts.numDisplay(startVal) : startVal;
 
           const disp = document.createElement('span');
           disp.className = 'sp-disp';
@@ -2331,19 +2773,25 @@
             if (displayFn) disp.textContent = displayFn(nv);
           };
 
+          // Guard: prevent slider→numInp feedback when numInp sets slider.value
+          let numDriving = false;
+
           // Slider drag → update number + display in real-time
           slider.addEventListener('input', () => {
+            if (numDriving) return;            // ignore echo from numInp handler
             const val = sliderToVal(parseInt(slider.value, 10));
-            numInp.value = val;
+            numInp.value = hasCustomNum ? opts.numDisplay(val) : val;
             updateDisp(val);
           });
 
           // Number input → update slider + display
           numInp.addEventListener('input', () => {
-            const nv = parseInt(numInp.value, 10);
-            if (!isNaN(nv)) {
+            const nv = hasCustomNum ? opts.numParse(numInp.value) : parseInt(numInp.value, 10);
+            if (nv !== null && !isNaN(nv)) {
               const clamped = Math.max(min, Math.min(max, nv));
+              numDriving = true;
               slider.value = valToSlider(clamped);
+              numDriving = false;
               updateDisp(clamped);
             }
           });
@@ -2353,11 +2801,7 @@
           const commit = () => {
             if (done) return;
             done = true;
-            const parsed = parseInt(numInp.value, 10);
-            if (!isNaN(parsed)) {
-              const clamped = Math.max(min, Math.min(max, parsed));
-              if (clamped !== rawVal) { onChange(clamped); return; }
-            }
+            if (curVal !== rawVal) { onChange(curVal); return; }
             restore();
           };
           const cancel = () => {
@@ -2366,9 +2810,9 @@
             restore();
           };
 
-          // Slider release → sync number input and commit
+          // Slider release → sync number input display and commit
           slider.addEventListener('pointerup', () => {
-            numInp.value = sliderToVal(parseInt(slider.value, 10));
+            numInp.value = hasCustomNum ? opts.numDisplay(curVal) : curVal;
             commit();
           });
 
@@ -2451,6 +2895,17 @@
       if (v === 0x7F) return '\u221E';  // ∞
       return String(v);
     }
+
+    // Micro-timing → musical fraction string
+    // Each step = 1/16 note = 24 micro-timing units → 1 unit = 1/384 whole note
+    function utimeFrac(n) {
+      if (n === 0) return '0';
+      const sign = n > 0 ? '+' : '-';
+      const a = Math.abs(n);
+      const g = gcd(a, 384);
+      return sign + (a / g) + '/' + (384 / g);
+    }
+    function gcd(a, b) { while (b) { [a, b] = [b, a % b]; } return a; }
 
   </script>
 </body>

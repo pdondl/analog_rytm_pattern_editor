@@ -43,15 +43,30 @@ KIT_NUMBER_OFF     = 0x3325
 PL_SRC_P1   = 0x00  # SRC param 1 (LEV for most machines)
 PL_SRC_P2   = 0x01  # SRC param 2 (TUN for most machines)
 PL_SRC_P3   = 0x02  # SRC param 3 (DEC for most machines)
-PL_SMP_TUN  = 0x08  # Sample tune
+PL_SRC_P4   = 0x03  # SRC param 4
+PL_SRC_P5   = 0x04  # SRC param 5
+PL_SRC_P8   = 0x07  # SRC param 8
+PL_SMP_TUN  = 0x08  # Sample tune (bipolar: 64=0)
+PL_SMP_FIN  = 0x09  # Sample fine tune (bipolar: 64=0)
+PL_SMP_LOP  = 0x0E  # Sample loop (0=OFF, 1=ON)
+PL_FLT_DEC  = 0x12  # Filter decay (127=inf)
+PL_FLT_REL  = 0x13  # Filter release (127=inf)
 PL_FLT_FRQ  = 0x14  # Filter frequency
 PL_FLT_RES  = 0x15  # Filter resonance
-PL_AMP_DEC  = 0x1A  # Amp decay
+PL_FLT_TYP  = 0x16  # Filter type (0-6)
+PL_FLT_ENV  = 0x17  # Filter env depth (bipolar: 64=0)
+PL_AMP_DEC  = 0x1A  # Amp decay (127=inf)
 PL_AMP_DEL  = 0x1C  # Delay send
 PL_AMP_REV  = 0x1D  # Reverb send
-PL_AMP_PAN  = 0x1E  # Pan
+PL_AMP_PAN  = 0x1E  # Pan (0=L64, 64=C, 127=R63)
 PL_AMP_VOL  = 0x1F  # Volume
-PL_LFO_SPD  = 0x21  # LFO speed
+PL_LFO_SPD  = 0x21  # LFO speed (bipolar: 64=0)
+PL_LFO_MUL  = 0x22  # LFO multiply (0-11)
+PL_LFO_FAD  = 0x23  # LFO fade (bipolar: 64=0)
+PL_LFO_DST  = 0x24  # LFO destination
+PL_LFO_WAV  = 0x25  # LFO waveform (0-6)
+PL_LFO_SPH  = 0x26  # LFO start phase (0-127)
+PL_LFO_MOD  = 0x27  # LFO trig mode (0-4)
 PL_LFO_DEP  = 0x28  # LFO depth
 
 # Trig bits: 14 bits per step, packed in 112 bytes (64 steps × 14 bits = 896 bits = 112 bytes)
@@ -207,8 +222,8 @@ def make_pattern():
         ('CP_CLASSIC',  16, 2, [4, 12], {}),                    # CP: with snare
         ('BT_CLASSIC',  16, 2, [], {}),                          # BT: off
         ('XT_CLASSIC',  16, 2, [2, 6, 10, 14], {}),             # LT: offbeat 16ths
-        ('CH_CLASSIC',  16, 2, [], {}),                          # MT: off
-        ('OH_CLASSIC',  16, 2, [], {}),                          # HT: off
+        ('XT_CLASSIC',  16, 2, [], {}),                          # MT: off
+        ('XT_CLASSIC',  16, 2, [], {}),                          # HT: off
         ('CH_METALLIC', 16, 2, list(range(16)), {}),             # CH: every step
         ('OH_METALLIC', 16, 2, [2, 6, 10, 14], {6: 10}),        # OH: offbeat, step 7 → HH LAB
         ('CY_RIDE',     16, 2, [0, 8], {}),                     # CY: every bar
@@ -317,8 +332,8 @@ def make_pattern():
     })
     seq += 1
 
-    # OH (track 9): LFO depth on accented step
-    add_plock(raw, seq, 9, PL_LFO_DEP, {6: 100, 14: 80})
+    # OH (track 9): LFO depth on accented step (bipolar: 64=center)
+    add_plock(raw, seq, 9, PL_LFO_DEP, {6: 100, 14: 30})  # +36, -34
     seq += 1
 
     # CY (track 10): long reverb tail
@@ -327,6 +342,83 @@ def make_pattern():
 
     # CB (track 11): SRC tune variation
     add_plock(raw, seq, 11, PL_SRC_P2, {4: 70, 12: 55})
+    seq += 1
+
+    # ── New plocks to exercise rich parameter display ────────────────────
+
+    # BD (track 0): filter type variation
+    add_plock(raw, seq, 0, PL_FLT_TYP, {0: 0, 4: 2, 8: 3, 12: 6})  # LP2, BP, HP1, PK
+    seq += 1
+
+    # BD (track 0): filter env depth (bipolar: 64=center)
+    add_plock(raw, seq, 0, PL_FLT_ENV, {0: 90, 4: 40, 8: 64, 12: 100})  # +26, -24, 0, +36
+    seq += 1
+
+    # BD (track 0): amp decay with infinity
+    add_plock(raw, seq, 0, PL_AMP_DEC, {0: 80, 8: 127})  # 80, inf
+    seq += 1
+
+    # SD (track 1): LFO waveform
+    add_plock(raw, seq, 1, PL_LFO_WAV, {4: 1, 12: 3})  # SIN, SAW
+    seq += 1
+
+    # SD (track 1): LFO trig mode
+    add_plock(raw, seq, 1, PL_LFO_MOD, {4: 0, 12: 2})  # FRE, HLD
+    seq += 1
+
+    # SD (track 1): LFO speed (bipolar)
+    add_plock(raw, seq, 1, PL_LFO_SPD, {4: 80, 12: 30})  # +16, -34
+    seq += 1
+
+    # SD (track 1): LFO destination (valid internal IDs)
+    add_plock(raw, seq, 1, PL_LFO_DST, {4: 20, 12: 8})  # F:FRQ (id=20), S:TUN (id=8)
+    seq += 1
+
+    # SD (track 1): LFO multiply
+    add_plock(raw, seq, 1, PL_LFO_MUL, {4: 3, 12: 8})  # 8, 256
+    seq += 1
+
+    # LT (track 5): sample loop toggle
+    add_plock(raw, seq, 5, PL_SMP_LOP, {2: 1, 6: 0, 10: 1, 14: 0})  # ON, OFF, ON, OFF
+    seq += 1
+
+    # LT (track 5): sample fine tune (bipolar)
+    add_plock(raw, seq, 5, PL_SMP_FIN, {2: 54, 6: 74, 10: 64, 14: 44})  # -10, +10, 0, -20
+    seq += 1
+
+    # CH (track 8): micro-timing values to show fractions
+    raw[ch_base + MICRO_TIMING_OFF + 0] = 12   # +12 = +1/32
+    raw[ch_base + MICRO_TIMING_OFF + 4] = 6    # +6 = +1/64
+    raw[ch_base + MICRO_TIMING_OFF + 8] = 0x3F & (-6 + 64)  # -6 = -1/64
+    raw[ch_base + MICRO_TIMING_OFF + 12] = 0x3F & (-12 + 64)  # -12 = -1/32
+
+    # SD Classic (track 1): P8 = BAL (bipolar, machine 3)
+    add_plock(raw, seq, 1, PL_SRC_P8, {4: 32, 12: 96})  # -32, +32
+    seq += 1
+
+    # LFO fade (bipolar)
+    add_plock(raw, seq, 1, PL_LFO_FAD, {4: 30, 12: 90})  # -34, +26
+    seq += 1
+
+    # BD (track 0): SRC TUN (P2) — limited bipolar for BD Hard (-32..+32)
+    add_plock(raw, seq, 0, PL_SRC_P2, {0: 76, 4: 52, 8: 64, 12: 32})  # +12, -12, +0, -32 (min)
+    seq += 1
+
+    # BD TUN fine companion (type=0x80, track=0x80) — must follow coarse TUN immediately
+    # fine/128 = fractional part: 64→+0.50, 0→+0.00, 32→+0.25
+    add_plock(raw, seq, 0x80, 0x80, {0: 64, 4: 0, 8: 32, 12: 0})  # +12.50, -12.00, +0.25, -32.00
+    seq += 1
+
+    # CP (track 3): filter decay with infinity
+    add_plock(raw, seq, 3, PL_FLT_DEC, {4: 80, 12: 127})  # 80, ∞
+    seq += 1
+
+    # CP (track 3): filter release with infinity
+    add_plock(raw, seq, 3, PL_FLT_REL, {4: 50, 12: 127})  # 50, ∞
+    seq += 1
+
+    # BD (track 0): LFO start phase (varied degrees)
+    add_plock(raw, seq, 0, PL_LFO_SPH, {0: 0, 4: 32, 8: 64, 12: 96})  # 0°, 90°, 180°, 270°
     seq += 1
 
     return raw
@@ -406,7 +498,7 @@ def main():
     # Track machines for the kit
     track_machines = [
         'BD_HARD', 'SD_CLASSIC', 'RS_CLASSIC', 'CP_CLASSIC',
-        'BT_CLASSIC', 'XT_CLASSIC', 'CH_CLASSIC', 'OH_CLASSIC',
+        'BT_CLASSIC', 'XT_CLASSIC', 'XT_CLASSIC', 'XT_CLASSIC',
         'CH_METALLIC', 'OH_METALLIC', 'CY_RIDE', 'CB_CLASSIC',
     ]
 
