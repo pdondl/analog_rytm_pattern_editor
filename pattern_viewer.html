@@ -793,22 +793,59 @@
       32: new Set([3,7]),        // SY Raw: P4=DET, P8=BAL
     };
 
-    // Machines where TUN range is limited to -32..+32 (raw 32-96) instead of full -64..+63
-    // BD, SD, RS machines (except RS Classic which has T1 not TUN)
-    const MACHINE_TUN_LIMITED = new Set([
-      0, 1,           // BD Hard, BD Classic
-      2, 3,           // SD Hard, SD Classic
-      4,              // RS Hard
-      13, 14,         // BD FM, SD FM
-      21, 22, 23,     // BD Plastic, BD Silky, SD Natural
-      26,             // BD Sharp
-      30, 31,         // BD Acoustic, SD Acoustic
-    ]);
+    // Machine-specific decimal (coarse+fine) params
+    // machineType → { plockIdx: halfRange }  (display: -halfRange.00 .. +halfRange.00)
+    // TUN (plock 1) uses halfRange from here; other params keyed by their plock index
+    const MACHINE_DECIMAL = {
+      0:  { 1: 32 },               // BD Hard: TUN
+      1:  { 1: 32 },               // BD Classic: TUN
+      2:  { 1: 32 },               // SD Hard: TUN
+      3:  { 1: 32 },               // SD Classic: TUN
+      4:  { 1: 32 },               // RS Hard: TUN
+      5:  { 1: 32, 4: 32 },        // RS Classic: T1=P2(idx1), T2=P5(idx4) both ±32
+      13: { 1: 32, 7: 32 },        // BD FM: TUN, FMT=P8(idx7)
+      14: { 1: 32, 3: 32 },        // SD FM: TUN, FMT=P4(idx3)
+      21: { 1: 32 },               // BD Plastic: TUN
+      22: { 1: 32 },               // BD Silky: TUN
+      23: { 1: 32 },               // SD Natural: TUN
+      26: { 1: 32 },               // BD Sharp: TUN
+      28: { 3: 16 },               // SY Dual VCO: DET=P4(idx3) ±16
+      29: { 1: 24 },               // SY Chip: TUN ±24
+      30: { 1: 32 },               // BD Acoustic: TUN
+      31: { 1: 24 },               // SD Acoustic: TUN ±24
+      32: { 1: 24, 3: 24 },        // SY Raw: TUN ±24, DET=P4(idx3) ±24
+    };
+
+    // Machine-specific inf127 params (value 127 = ∞)
+    // machineType → Set of plock indices (0-7)
+    const MACHINE_INF127 = {
+      28: new Set([2, 4]),          // SY Dual VCO: DEC1=P3(idx2), DEC2=P5(idx4)
+      29: new Set([2]),             // SY Chip: DCY=P3(idx2)
+      32: new Set([2]),             // SY Raw: DCY=P3(idx2)
+    };
+
+    // Machine-specific frequency params (coarse*128 + fine = Hz, range 0-16256)
+    // machineType → Set of plock indices
+    const MACHINE_FREQ = {
+      33: new Set([1, 3, 4, 5, 6, 7]),  // HH Lab: OSC1-OSC6 (P2,P4,P5,P6,P7,P8)
+    };
 
     // Machine-specific enum params
     // machineType → { plockIdx: string[] }
     const MACHINE_ENUMS = {
-      25: { 3: ['A','B','C','D'] },  // CY Ride: P4=TYP
+      0:  { 6: ['sin','asin','tri'] },  // BD Hard: P7=WAV
+      1:  { 6: ['sin','asin','tri'],    // BD Classic: P7=WAV
+            7: ['OFF','Tic',
+                'A1','B1','C1','D1','E1',
+                'A2','B2','C2','D2','E2',
+                'A3','B3','C3','D3','E3',
+                'A4','B4','C4','D4','E4',
+                'A5','B5','C5','D5','E5'] },  // BD Classic: P8=TRA
+      7:  { 5: ['1','2','3'] },          // BT Classic: P6=SNP
+      16: { 7: ['POS','NEG'] },         // UT Impulse: P8=POL
+      21: { 3: ['A','B'] },             // BD Plastic: P4=TYP
+      24: { 5: ['OFF','ON'] },          // HH Basic: P6=RST
+      25: { 3: ['A','B','C','D'] },     // CY Ride: P4=TYP
       26: { 6: ['sinA','sinB','asinA','asinB','triA','triB','ssawA','ssawB','sawA','sawB','sqrA','sqrB'] },  // BD Sharp: P7=WAV
       29: {
         6: ['sin','asin','tri','ssaw','saw','sqr','noise',
@@ -822,8 +859,8 @@
             '6.25Hz','7.5Hz','10Hz','12.5Hz','15Hz','20Hz','25Hz','30Hz',
             '40Hz','50Hz','60Hz','75Hz','100Hz','120Hz','150Hz','180Hz',
             '200Hz','240Hz','250Hz','300Hz','350Hz','360Hz','400Hz','420Hz',
-            '480Hz','240.5Hz','200.5Hz','150.5Hz','120.5Hz','100.5Hz',
-            '60.5Hz','50.5Hz','30.5Hz','25.5Hz'],  // SY Chip: P8=SPD
+            '480Hz','240S','200S','150S','120S','100S',
+            '60S','50S','30S','25S'],  // SY Chip: P8=SPD (S = single shot)
       },
       30: { 6: ['sinA','sinB','asinA','asinB','triA','triB','ssawA','ssawB','sawA','sawB','sqrA','sqrB'] },  // BD Acoustic: P7=WAV
       32: {
@@ -2519,15 +2556,24 @@
         let isBipolar = info.bipolar;
 
         // For SRC params, check machine-specific overrides
-        let tunLimited = false;
+        let decimalHR = null;  // halfRange for decimal (coarse+fine) params
+        let machInf127 = false;
+        let isFreqParam = false;  // coarse*128+fine = Hz (HH Lab)
         if (secKey === 'SRC' && pt <= 0x07 && machineType !== null && machineType !== undefined) {
           if (MACHINE_ENUMS[machineType]?.[pt]) enumArr = MACHINE_ENUMS[machineType][pt];
           if (MACHINE_BIPOLAR[machineType]?.has(pt)) isBipolar = true;
-          // TUN is always bipolar (64 = center)
-          if (lbl === 'TUN') {
-            isBipolar = true;
-            if (MACHINE_TUN_LIMITED.has(machineType)) tunLimited = true;
+          // Decimal coarse+fine params
+          const decCfg = MACHINE_DECIMAL[machineType];
+          if (decCfg && decCfg[pt] !== undefined) {
+            decimalHR = decCfg[pt];
+            isBipolar = true;  // decimal params are always bipolar
           }
+          // Frequency params (coarse*128 + fine)
+          if (MACHINE_FREQ[machineType]?.has(pt)) isFreqParam = true;
+          // TUN is always bipolar even if not decimal
+          if (lbl === 'TUN') isBipolar = true;
+          // Machine-specific inf127
+          if (MACHINE_INF127[machineType]?.has(pt)) machInf127 = true;
         }
 
         let displayFn, pMin = 0, pMax = 128, snap, snapR;
@@ -2535,17 +2581,25 @@
           const enumLen = enumArr.length;
           displayFn = (v) => v >= enumLen ? 'TRK' : (enumArr[v] ?? String(v));
           pMax = enumLen;  // 0..(len-1) for values, len=TRK
+        } else if (machInf127) {
+          // Machine-specific inf127 (SY Dual VCO DEC1/DEC2, SY Chip DCY, SY Raw DCY)
+          displayFn = (v) => v >= 128 ? 'TRK' : v === 127 ? '\u221E' : String(v);
+        } else if (isFreqParam) {
+          // Frequency param: slider 0-16256 Hz (coarse*128+fine), +1 for TRK
+          pMin = 0; pMax = 16257;
+          displayFn = (v) => v >= 16256 ? 'TRK' : v + 'Hz';
         } else if (isBipolar) {
-          if (tunLimited) {
-            // BD/SD/RS TUN: half-step slider (0.50 resolution)
-            // Slider: 0=-32.00, 64=0.00, 128=+32.00, 129=TRK
-            pMin = 0; pMax = 129;
+          if (decimalHR !== null) {
+            // Decimal coarse+fine param: half-step slider (0.50 resolution)
+            const hr = decimalHR;
+            const sliderHalf = hr * 2;  // number of slider positions each side of center
+            pMin = 0; pMax = sliderHalf * 2 + 1;  // +1 for TRK
             displayFn = (v) => {
-              if (v >= 129) return 'TRK';
-              const d = (v - 64) * 0.50;
+              if (v >= sliderHalf * 2) return 'TRK';
+              const d = (v - sliderHalf) * 0.50;
               return (d >= 0 ? '+' : '') + d.toFixed(2);
             };
-            snap = 64; snapR = 3;
+            snap = sliderHalf; snapR = 3;
           } else {
             displayFn = (v) => {
               if (v >= 128) return 'TRK';
@@ -2585,20 +2639,39 @@
           sliderInitVal = plInitVal >= 128 ? 0    : (LFO_DEST_ID_TO_UI.get(plInitVal) ?? 0);
         }
 
-        // For tunLimited, convert coarse+fine to half-step slider value
-        if (tunLimited) {
+        // For freq params, convert coarse*128+fine to Hz slider value
+        if (isFreqParam) {
           const fineArr = plockFineValues && plockFineValues[t].get(pt);
           const fineVal = (fineArr && locked) ? fineArr[s] : 0xFF;
           const fine = (fineVal !== 0xFF) ? fineVal : 0;
           if (locked) {
-            // Convert coarse+fine → half-step: round((coarse-64 + fine/128) / 0.50) + 64
-            sliderRawVal = Math.round(((plVal - 64) + fine / 128) / 0.50) + 64;
+            sliderRawVal = plVal * 128 + fine;
           } else {
-            sliderRawVal = pMax;  // 129 = TRK
+            sliderRawVal = pMax;  // TRK
+          }
+          const defFine = poolSound && info.sndOff + 1 < poolSound.length
+            ? poolSound[info.sndOff + 1]
+            : (getKitDefault(t, info.sndOff + 1) ?? 0);
+          sliderInitVal = locked ? sliderRawVal : (plInitVal * 128 + (defFine >> 1));
+        }
+
+        // For decimal params, convert coarse+fine to half-step slider value
+        if (decimalHR !== null) {
+          const hr = decimalHR;
+          const sliderCenter = hr * 2;  // slider midpoint
+          const fineArr = plockFineValues && plockFineValues[t].get(pt);
+          const fineVal = (fineArr && locked) ? fineArr[s] : 0xFF;
+          const fine = (fineVal !== 0xFF) ? fineVal : 0;
+          if (locked) {
+            // Convert coarse+fine → half-step: round((coarse-64 + fine/128) / 0.50) + sliderCenter
+            sliderRawVal = Math.round(((plVal - 64) + fine / 128) / 0.50) + sliderCenter;
+          } else {
+            sliderRawVal = pMax;  // TRK
           }
           // Kit default is coarse only (no fine)
-          const kitCoarse = (plInitVal >= 32 && plInitVal <= 96) ? plInitVal : 64;
-          sliderInitVal = locked ? sliderRawVal : (kitCoarse - 32) * 2;
+          const coarseMin = 64 - hr;
+          const kitCoarse = (plInitVal >= coarseMin && plInitVal <= 64 + hr) ? plInitVal : 64;
+          sliderInitVal = locked ? sliderRawVal : (kitCoarse - coarseMin) * 2;
         }
 
         let onChange;
@@ -2607,17 +2680,38 @@
             writePlock(t, ptCapture, s, v >= pMax ? 0xFF : LFO_DEST_UI_IDS[v]);
             refreshAfterEdit();
           };
-        } else if (tunLimited) {
+        } else if (isFreqParam) {
           onChange = (v) => {
-            if (v >= 129) {
+            if (v >= 16256) {
+              clearPlockFine(t, ptCapture, s);
+              writePlock(t, ptCapture, s, 0xFF);
+            } else {
+              const coarse = Math.min(127, Math.floor(v / 128));
+              const fine   = Math.min(127, v - coarse * 128);
+              writePlock(t, ptCapture, s, coarse);
+              if (fine > 0) {
+                writePlockFine(t, ptCapture, s, fine);
+              } else {
+                clearPlockFine(t, ptCapture, s);
+              }
+            }
+            refreshAfterEdit();
+          };
+        } else if (decimalHR !== null) {
+          const hr = decimalHR;
+          const sliderCenter = hr * 2;
+          const coarseMin = 64 - hr;
+          const coarseMax = 64 + hr;
+          onChange = (v) => {
+            if (v >= sliderCenter * 2) {
               // TRK: clear both coarse and fine
               clearPlockFine(t, ptCapture, s);
               writePlock(t, ptCapture, s, 0xFF);
             } else {
               // v is in half-step domain (may be float from number input).
-              // Convert to coarse (32-96) + fine (0-127).
-              const halfV  = v / 2;                                   // 0-64
-              const coarse = Math.min(96, 32 + Math.floor(halfV));
+              // Convert to coarse + fine (0-127).
+              const halfV  = v / 2;
+              const coarse = Math.min(coarseMax, coarseMin + Math.floor(halfV));
               const fine   = Math.min(127, Math.round((halfV - Math.floor(halfV)) * 128));
               writePlock(t, ptCapture, s, coarse);
               if (fine > 0) {
@@ -2641,18 +2735,32 @@
         };
         if (snap !== undefined) { opts.snap = snap; opts.snapR = snapR; }
 
-        // For tunLimited: number input shows/accepts display-unit decimals
-        if (tunLimited) {
-          opts.numDisplay = (v) => v >= 129 ? '' : ((v - 64) * 0.50).toFixed(2);
+        // For freq params: number input shows/accepts Hz integers
+        if (isFreqParam) {
+          opts.numDisplay = (v) => v >= 16256 ? '' : String(v);
+          opts.numParse = (str) => {
+            const f = parseInt(str, 10);
+            if (isNaN(f)) return null;
+            return Math.max(0, Math.min(16256, f));
+          };
+          opts.numStep = '1';
+          opts.numMin = 0;
+          opts.numMax = 16256;
+        }
+
+        // For decimal params: number input shows/accepts display-unit decimals
+        if (decimalHR !== null) {
+          const hr = decimalHR;
+          const sliderCenter = hr * 2;
+          opts.numDisplay = (v) => v >= sliderCenter * 2 ? '' : ((v - sliderCenter) * 0.50).toFixed(2);
           opts.numParse = (str) => {
             const f = parseFloat(str);
             if (isNaN(f)) return null;
-            // Return float slider value — onChange handles sub-half-step precision
-            return Math.max(-32, Math.min(32, f)) / 0.50 + 64;
+            return Math.max(-hr, Math.min(hr, f)) / 0.50 + sliderCenter;
           };
           opts.numStep = '0.01';
-          opts.numMin = -32;
-          opts.numMax = 32;
+          opts.numMin = -hr;
+          opts.numMax = hr;
         }
 
         const showInput = typeof displayVal === 'number'
@@ -2660,8 +2768,24 @@
           : displayVal;
         let showVal;
 
-        // For tunLimited: compute showVal from actual coarse+fine data
-        if (tunLimited) {
+        // For freq params: compute showVal from actual coarse+fine data
+        if (isFreqParam) {
+          if (locked) {
+            const fineArr = plockFineValues && plockFineValues[t].get(pt);
+            const fineVal = fineArr ? fineArr[s] : 0xFF;
+            const fine = (fineVal !== 0xFF) ? fineVal : 0;
+            showVal = (plVal * 128 + fine) + 'Hz';
+          } else if (kitDef !== null) {
+            const defFine = poolSound && info.sndOff + 1 < poolSound.length
+              ? poolSound[info.sndOff + 1]
+              : (getKitDefault(t, info.sndOff + 1) ?? 0);
+            showVal = (kitDef * 128 + (defFine >> 1)) + 'Hz';  // s_u16_t: hi=byte[0], lo<<1=byte[1]
+          } else {
+            showVal = '?';
+          }
+        // For decimal params: compute showVal from actual coarse+fine data
+        } else if (decimalHR !== null) {
+          const coarseMin = 64 - decimalHR;
           if (locked) {
             const fineArr = plockFineValues && plockFineValues[t].get(pt);
             const fineVal = fineArr ? fineArr[s] : 0xFF;
@@ -2669,7 +2793,7 @@
             const d = (plVal - 64) + fine / 128;
             showVal = (d >= 0 ? '+' : '') + d.toFixed(2);
           } else if (kitDef !== null) {
-            showVal = displayFn((kitDef - 32) * 2);  // coarse-only kit default
+            showVal = displayFn((kitDef - coarseMin) * 2);  // coarse-only kit default
           } else {
             showVal = '?';
           }
