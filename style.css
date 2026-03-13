@@ -1,0 +1,580 @@
+:root {
+  --bg:         #111;
+  --surface:    #1c1c1c;
+  --border:     #2a2a2a;
+  --fg:         #ddd;
+  --muted:      #555;
+  --accent:     #e05a00;
+  --trig-on:    #e05a00;
+  --trig-off:   #202020;
+  --step-size:  32px;
+  --step-gap:   2px;
+  --group-gap:  8px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  padding: 28px;
+  min-height: 100vh;
+}
+
+h1 {
+  color: var(--accent);
+  font-size: 1.1em;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.subtitle {
+  color: var(--muted);
+  font-size: 0.8em;
+  letter-spacing: 1px;
+  margin-bottom: 24px;
+}
+
+/* Controls */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+button {
+  background: var(--surface);
+  border: 1px solid #3a3a3a;
+  color: var(--fg);
+  padding: 7px 16px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.85em;
+  letter-spacing: 1px;
+  border-radius: 2px;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+button:disabled { opacity: 0.35; cursor: default; }
+
+#status {
+  font-size: 0.8em;
+  padding: 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--muted);
+}
+#status.ok  { color: #5cb85c; border-color: #2d4a2d; }
+#status.err { color: #d9534f; border-color: #4a2d2d; }
+
+#port-info {
+  color: var(--muted);
+  margin-bottom: 20px;
+  min-height: 1em;
+}
+
+/* Pattern meta info */
+#pattern-meta {
+  font-size: 0.8em;
+  color: var(--muted);
+  margin-bottom: 14px;
+  letter-spacing: 1px;
+  min-height: 1em;
+}
+#pattern-meta span { color: var(--fg); }
+.meta-val.editable { cursor: pointer; padding: 0 3px; border-radius: 1px; }
+.meta-val.editable:hover { background: rgba(255,255,255,0.08); }
+.meta-input {
+  width: 48px; background: #0a0a0a; border: 1px solid var(--accent);
+  color: var(--fg); font-family: inherit; font-size: 1em;
+  padding: 1px 3px; outline: none; border-radius: 1px;
+}
+#pattern-meta .meta-arrow {
+  cursor: pointer; user-select: none; padding: 0 2px;
+  color: #777; font-size: 0.75em; vertical-align: middle;
+}
+#pattern-meta .meta-arrow:hover { color: var(--accent); }
+#pattern-meta .meta-line { display: block; }
+#pattern-meta .meta-line > span { display: inline-block; min-width: 130px; }
+#pattern-meta .meta-line > span:first-child { min-width: 185px; }
+#pattern-meta .meta-suffix { color: var(--muted); }
+#pattern-meta .meta-val { display: inline-block; min-width: 24px; text-align: left; }
+#pattern-meta .meta-slider {
+  -webkit-appearance: none; appearance: none;
+  width: 40px; height: 4px; background: #333; border-radius: 2px;
+  outline: none; vertical-align: middle; margin: 0 2px; cursor: pointer;
+}
+#pattern-meta .meta-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 10px; height: 10px;
+  background: var(--accent); border-radius: 50%; cursor: pointer;
+}
+.track-settings-panel .ts-separator {
+  width: 1px; height: 1em; background: var(--border); margin: 0 4px;
+}
+.track-settings-panel .ts-arrow {
+  cursor: pointer; user-select: none; padding: 0 1px;
+  color: #777; font-size: 0.7em; vertical-align: middle;
+}
+.track-settings-panel .ts-arrow:hover { color: var(--accent); }
+.track-settings-panel .ts-suffix { color: var(--muted); font-size: 0.85em; }
+
+/* Grid */
+#grid-wrap { overflow-x: auto; padding-bottom: 8px; }
+
+.grid {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* Step-number ruler */
+.ruler-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.track-label-space {
+  flex: 0 0 80px;
+}
+.ruler-groups {
+  display: flex;
+  gap: var(--group-gap);
+}
+.ruler-group {
+  display: flex;
+  gap: 6px;
+}
+.ruler-beat {
+  display: flex;
+  gap: var(--step-gap);
+}
+.ruler-num {
+  width: var(--step-size);
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1;
+}
+
+/* Track rows */
+.track-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.track-label {
+  flex: 0 0 80px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  padding-right: 10px;
+  gap: 2px;
+  font-size: 0.75em;
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+.track-meta {
+  font-size: 0.82em;
+  color: #444;
+  letter-spacing: 0;
+}
+.track-machine {
+  font-size: 0.72em;
+  color: #555;
+}
+.track-settings-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  font-size: 0.8em;
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.track-settings-panel .ts-title {
+  color: var(--accent);
+  font-weight: bold;
+  letter-spacing: 1px;
+  min-width: 68px;
+}
+.track-settings-panel .ts-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.track-settings-panel .ts-lbl {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.track-settings-panel .ts-val {
+  color: var(--fg);
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 1px;
+}
+.track-settings-panel .ts-val:hover {
+  background: rgba(255,255,255,0.08);
+}
+.track-settings-panel .ts-input {
+  width: 40px; background: #0a0a0a; border: 1px solid var(--accent);
+  color: var(--fg); font-family: inherit; font-size: 1em;
+  padding: 1px 3px; outline: none; border-radius: 1px;
+}
+.track-settings-panel .ts-flag {
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 1px;
+  color: #555;
+  font-size: 0.9em;
+}
+.track-settings-panel .ts-flag.on { color: #e05a00; }
+.track-settings-panel .ts-flag:hover { color: var(--fg); }
+.track-steps {
+  display: flex;
+  gap: var(--group-gap);
+}
+.step-group {
+  display: flex;
+  gap: 6px;
+}
+
+.step {
+  width: var(--step-size);
+  height: var(--step-size);
+  border-radius: 1px;
+  background: var(--trig-off);
+  border: 1px solid #2a2a2a;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+}
+.step.on {
+  background: var(--trig-on);
+  border-color: #ff7722;
+  box-shadow: 0 0 5px rgba(224, 90, 0, 0.4);
+}
+/* Accented trig: bright amber */
+.step.on.accent {
+  background: #ffbb44;
+  border-color: #ffdd77;
+  box-shadow: 0 0 6px rgba(255, 187, 68, 0.5);
+}
+/* Muted trig: grey — programmed but won't fire */
+.step.on.mute {
+  background: #404040;
+  border-color: #606060;
+  box-shadow: none;
+}
+/* Steps beyond track length are dimmed */
+.step.inactive {
+  opacity: 0.08;
+}
+/* Trigs beyond track length: even darker to flag them */
+.step.inactive.on, .step.inactive.lock-trig {
+  opacity: 0.04;
+}
+/* Trig modifier dots */
+.trig-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+/* Retrig — top-right; dark ring keeps it visible on bright accent steps */
+.trig-dot.retrig { top:  2px; right: 2px; background: #ddcc22;
+                   box-shadow: 0 0 0 1px rgba(0,0,0,0.45); }
+/* Swing — stacked just below retrig in top-right */
+.trig-dot.swing  { top: 12px; right: 2px; background: #4499ff;
+                   box-shadow: 0 0 0 1px rgba(0,0,0,0.35); }
+
+/* UTIME arrow — bottom-centre of step, points right (late) or left (early) */
+.utime-arrow {
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  pointer-events: none;
+}
+.utime-arrow.late  { border-top: 5px solid transparent;
+                     border-bottom: 5px solid transparent;
+                     border-left:  7px solid rgba(255,255,255,0.9); }
+.utime-arrow.early { border-top: 5px solid transparent;
+                     border-bottom: 5px solid transparent;
+                     border-right: 7px solid rgba(255,255,255,0.9); }
+
+/* Lock trig: parameter lock present, but no sound trigger */
+.step.lock-trig {
+  background: #0e1f2a;
+  border-color: #2a6080;
+  box-shadow: 0 0 3px rgba(42, 96, 128, 0.35);
+}
+/* Upper-left corner indicators — sound-lock (cyan) takes the triangle;
+   plock (purple) takes the triangle when no sound-lock, or a stripe when both. */
+.step.has-sound-lock::before,
+.step.has-plock:not(.has-sound-lock)::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 0; height: 0;
+  border-style: solid;
+  border-width: 10px 10px 0 0;
+  border-color: #44ccdd transparent transparent transparent; /* cyan default */
+}
+.step.has-plock:not(.has-sound-lock)::before {
+  border-color: #cc44aa transparent transparent transparent; /* purple when no snd-lock */
+}
+/* Both active: purple diagonal stripe extending the sound-lock triangle's hypotenuse */
+.step.has-plock.has-sound-lock::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 20px; height: 20px;
+  background: #cc44aa;
+  clip-path: polygon(10px 0, 18px 0, 0 18px, 0 10px);
+}
+/* Beat groups — 4-step sub-groups within each 16-step group */
+.beat-group {
+  display: flex;
+  gap: var(--step-gap);
+  border-radius: 2px;
+}
+/* Note length bar — 2 px strip along step bottom, width ∝ note length */
+.note-len-bar {
+  position: absolute;
+  bottom: 0; left: 0;
+  height: 2px;
+  background: rgba(0, 0, 0, 0.38);  /* dark — readable on orange/amber trigs */
+  pointer-events: none;
+}
+.note-len-bar.inf {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.18);
+}
+/* Inspected step: ring around the cell */
+.step.inspected {
+  box-shadow: 0 0 0 2px #cc44aa !important;
+  z-index: 1;
+}
+/* Outer wrapper for steps — provides positioning context for slide lines */
+.steps-outer {
+  position: relative;
+}
+/* Slide connector line drawn below the step boxes */
+.slide-line {
+  position: absolute;
+  top: 34px;
+  height: 2px;
+  background: #44cc77;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+/* Page toggle */
+.page-ctrl {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.page-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Group separator lines */
+.group-sep {
+  width: 1px;
+  height: var(--step-size);
+  background: #2a2a2a;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.note {
+  margin-top: 22px;
+  font-size: 0.72em;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.note a { color: #666; }
+
+/* ── Step inspector panel ──────────────────────────────────────────────── */
+
+.step-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #131a20;
+  border: 1px solid #2a4a6a;
+  border-radius: 2px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  white-space: normal;
+}
+
+.sp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.72em;
+  color: var(--muted);
+  letter-spacing: 1px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #1e2e3a;
+}
+.sp-close {
+  background: none;
+  border: none;
+  color: #446;
+  font-size: 1.1em;
+  padding: 0 2px;
+  cursor: pointer;
+  line-height: 1;
+  letter-spacing: 0;
+}
+.sp-close:hover { color: var(--fg); border: none; }
+
+.sp-sections {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+/* Individual section box */
+.sp-sec {
+  flex-shrink: 0;
+  background: #161e26;
+  border: 1px solid #1e2e3a;
+  border-radius: 2px;
+  padding: 5px 7px;
+}
+.sp-sec-head {
+  font-size: 0.62em;
+  color: #446688;
+  letter-spacing: 2px;
+  text-align: center;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+}
+
+/* Flags column */
+.sp-flags {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sp-flag {
+  font-size: 0.68em;
+  padding: 2px 6px;
+  border: 1px solid #1e2e3a;
+  border-radius: 1px;
+  color: #334;
+  text-align: center;
+  letter-spacing: 1px;
+  min-width: 34px;
+  cursor: pointer;
+  user-select: none;
+}
+.sp-flag.on {
+  color: var(--accent);
+  border-color: #703000;
+  background: #1a0e00;
+}
+
+/* Parameter rows */
+.sp-params {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sp-param {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.sp-lbl {
+  font-size: 0.65em;
+  color: #446;
+  text-align: right;
+  letter-spacing: 0.5px;
+  min-width: 28px;
+}
+.sp-val {
+  font-size: 0.78em;
+  color: var(--fg);
+  min-width: 26px;
+}
+.sp-val.locked {
+  color: #cc44aa;
+}
+.sp-val.editable {
+  cursor: pointer;
+  user-select: none;
+  padding: 0 3px;
+  border-radius: 1px;
+}
+.sp-val.editable:hover {
+  background: rgba(255,255,255,0.06);
+}
+/* Slider + number editor row */
+.sp-editor {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 160px;
+}
+.sp-editor input[type="range"] {
+  flex: 1;
+  height: 3px;
+  min-width: 80px;
+  accent-color: #cc44aa;
+  cursor: pointer;
+}
+.sp-editor input[type="number"] {
+  width: 42px;
+  background: #0a0a0a;
+  color: var(--fg);
+  border: 1px solid #334;
+  border-radius: 1px;
+  font: inherit;
+  font-size: 0.9em;
+  padding: 1px 3px;
+  outline: none;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+.sp-editor input[type="number"]:focus {
+  border-color: #cc44aa;
+}
+.sp-editor input[type="number"]::-webkit-inner-spin-button,
+.sp-editor input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.sp-editor .sp-disp {
+  font-size: 0.85em;
+  color: #889;
+  min-width: 24px;
+  white-space: nowrap;
+}
+
+/* SYN/SMP/ENV/LFO flag row inside TRIG section */
+.sp-sw-row {
+  display: flex;
+  gap: 3px;
+  margin-top: 3px;
+}
+.sp-sw-row .sp-flag {
+  min-width: 26px;
+  font-size: 0.63em;
+}

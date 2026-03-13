@@ -1,0 +1,2311 @@
+// ─── Editor: grid rendering, panels, parameter editing, display helpers ──────
+// Depends on: ar-state.js, ar-constants.js, ar-sysex.js
+var S = AR.state;
+var U = AR.ui;
+var setStatus = AR.setStatus;
+
+    // ─── Render grid ──────────────────────────────────────────────────────────
+
+    function renderGrid(raw, page) {
+      closeStepPanel();
+      closeTrackPanel();
+      U.gridEl.innerHTML = '';
+
+      const GROUPS    = 2;
+      const GROUP_SZ  = 16;
+      const STEP_W    = 32;
+      const STEP_GAP  = 2;
+      const GROUP_GAP = 8;
+      const stepOffset = page * 32;
+
+      const swingAmount = (raw.length > SWING_AMOUNT_OFFSET) ? raw[SWING_AMOUNT_OFFSET] : 0;
+      const gridScaleMode = raw.length > SCALE_MODE_OFFSET ? raw[SCALE_MODE_OFFSET] : 0;
+      // In normal mode, master length governs all tracks (per-track values are ignored)
+      const gridMasterLenRaw = raw.length > MASTER_LENGTH_OFFSET + 1
+        ? (raw[MASTER_LENGTH_OFFSET] << 8) | raw[MASTER_LENGTH_OFFSET + 1] : 1;
+      // Effective master step count: 0=1024, 1=INF → treat both as 64 for grid; else min(val,64)
+      const gridMasterSteps = (gridMasterLenRaw === 0 || gridMasterLenRaw === 1)
+        ? 64 : Math.min(gridMasterLenRaw, 64);
+
+      const plockMap = parsePlocks(raw);
+
+      // Compute max effective steps across all tracks for page button state
+      let maxSteps = 0;
+      for (let t = 0; t < AR_NUM_TRACKS; t++) {
+        const ns = gridScaleMode
+          ? raw[4 + t * TRACK_V5_SZ + NUM_STEPS_OFFSET]
+          : gridMasterSteps;
+        maxSteps = Math.max(maxSteps, ns);
+      }
+      const page1Avail = maxSteps > 32;
+      U.btnPage1.disabled = !page1Avail;
+      U.btnPage1.style.opacity = page1Avail ? '' : '0.3';
+      U.btnPage1.style.pointerEvents = page1Avail ? '' : 'none';
+      // If viewing page 2 but no longer needed, switch to page 1
+      if (!page1Avail && page === 1) {
+        S.stepPage = 0;
+        U.btnPage0.classList.add('active');
+        U.btnPage1.classList.remove('active');
+        renderGrid(raw, 0);
+        return;
+      }
+
+      function stepCenterX(pageIdx) {
+        const g = Math.floor(pageIdx / GROUP_SZ);
+        const s = pageIdx % GROUP_SZ;
+        const gw = GROUP_SZ * STEP_W + (GROUP_SZ - 1) * STEP_GAP;
+        return g * (gw + GROUP_GAP) + s * (STEP_W + STEP_GAP) + STEP_W / 2;
+      }
+
+      // ── Ruler ─────────────────────────────────────────────────────────────
+      const ruler = document.createElement('div');
+      ruler.className = 'ruler-row';
+      const rulerSpace = document.createElement('div');
+      rulerSpace.className = 'track-label-space';
+      ruler.appendChild(rulerSpace);
+      const rulerGroups = document.createElement('div');
+      rulerGroups.className = 'ruler-groups';
+      for (let g = 0; g < GROUPS; g++) {
+        const grp = document.createElement('div');
+        grp.className = 'ruler-group';
+        for (let b = 0; b < GROUP_SZ / 4; b++) {
+          const beat = document.createElement('div');
+          beat.className = 'ruler-beat';
+          for (let s = 0; s < 4; s++) {
+            const n = document.createElement('div');
+            n.className = 'ruler-num';
+            const stepNum = stepOffset + g * GROUP_SZ + b * 4 + s + 1;
+            if (stepNum % 4 === 1) n.textContent = stepNum;
+            beat.appendChild(n);
+          }
+          grp.appendChild(beat);
+        }
+        rulerGroups.appendChild(grp);
+      }
+      ruler.appendChild(rulerGroups);
+      U.gridEl.appendChild(ruler);
+
+      // ── Track rows ────────────────────────────────────────────────────────
+      for (let t = 0; t < AR_NUM_TRACKS; t++) {
+        const trackBase = 4 + t * TRACK_V5_SZ;
+        const trigBits  = raw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
+        const numSteps  = gridScaleMode ? raw[trackBase + NUM_STEPS_OFFSET] : gridMasterSteps;
+
+        const row = document.createElement('div');
+        row.className = 'track-row';
+        row.dataset.track = t;
+        if (t === 12) row.style.marginTop = '10px';
+
+        // ── Label ──
+        const label = document.createElement('div');
+        label.className = 'track-label';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = TRACK_NAMES[t];
+        label.appendChild(nameSpan);
+        const machType = getTrackMachineType(t);
+        if (machType !== null) {
+          const machSpan = document.createElement('span');
+          machSpan.className = 'track-meta track-machine';
+          machSpan.textContent = MACHINE_NAMES[machType];
+          label.appendChild(machSpan);
+        }
+
+        // Click label → open/close track settings panel
+        label.style.cursor = 'pointer';
+        label.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (S.openTrackPanel && S.openTrackPanel.t === t) {
+            closeTrackPanel();
+          } else {
+            openTrackSettingsPanel(t);
+          }
+        });
+
+        row.appendChild(label);
+
+        // ── Steps outer ──
+        const stepsOuter = document.createElement('div');
+        stepsOuter.className = 'steps-outer';
+        const stepsWrap = document.createElement('div');
+        stepsWrap.className = 'track-steps';
+
+        const BEAT_SZ = 4;  // steps per beat-group
+        const slideSteps  = new Array(32).fill(false);
+        const activeSteps = new Array(32).fill(false);
+
+        for (let g = 0; g < GROUPS; g++) {
+          const grp = document.createElement('div');
+          grp.className = 'step-group';
+
+          for (let b = 0; b < GROUP_SZ / BEAT_SZ; b++) {
+            const beat = document.createElement('div');
+            beat.className = 'beat-group' + (b % 2 ? ' odd' : ' even');
+
+            for (let s = 0; s < BEAT_SZ; s++) {
+            const pageIdx  = g * GROUP_SZ + b * BEAT_SZ + s;
+            const stepIdx  = stepOffset + pageIdx;
+            const flags    = getTrigFlags(trigBits, stepIdx);
+            const isOn     = (flags & AR_TRIG_ENABLE) !== 0;
+            const isAccent = (flags & AR_TRIG_ACCENT) !== 0;
+            const isMute   = (flags & AR_TRIG_MUTE)   !== 0;
+            const isRetrig = (flags & AR_TRIG_RETRIG) !== 0;
+            const hasSwing = (flags & AR_TRIG_SWING)  !== 0;
+            const isSlide  = (flags & AR_TRIG_SLIDE)  !== 0;
+            const beyond   = stepIdx >= numSteps;
+            // Per-step locks stored in track arrays (not plock_seqs)
+            const noteRaw    = S.lastRaw[trackBase + NOTE_OFFSET     + stepIdx];
+            const veloRaw    = S.lastRaw[trackBase + VELOCITY_OFFSET + stepIdx];
+            const lenRaw     = S.lastRaw[trackBase + NOTE_LEN_OFFSET + stepIdx];
+            // notes bit 7: 1=no condition, 0=has condition (independent of note lock)
+            const hasTrigCond  = !beyond && (noteRaw & 0x80) === 0;
+            const noteLocked   = !beyond && (noteRaw & 0x7F) !== 0x7F;
+            const veloLocked   = !beyond && veloRaw !== 0xFF;
+            const lenLocked    = !beyond && lenRaw  !== 0xFF;
+            const microRaw     = S.lastRaw[trackBase + MICRO_TIMING_OFFSET + stepIdx];
+            const microVal     = microRaw & 0x3F;
+            const microSigned  = (microVal & 0x20) ? microVal - 64 : microVal;
+            const hasPlock = !beyond && (
+              plockMap[t][stepIdx] !== 0 ||
+              noteLocked || veloLocked || lenLocked || hasTrigCond || microSigned !== 0
+            );
+            const sndLock  = S.lastRaw[trackBase + SOUND_LOCK_OFFSET + stepIdx];
+            const hasSoundLock = !beyond && sndLock !== 0xFF;
+
+            // AR lock-trig: ENABLE set with SYN+SMP p-lock enabled (PL_EN)
+            // and their switch state OFF (PL_SW=0).  When PL_EN is not set,
+            // the AR uses the track default (SYN/SMP ON) regardless of PL_SW.
+            const SYN_SMP_EN = AR_TRIG_SYN_PL_EN | AR_TRIG_SMP_PL_EN;
+            const isLockTrig = !beyond && isOn &&
+              (flags & SYN_SMP_EN) === SYN_SMP_EN &&
+              (flags & (AR_TRIG_SYN_PL_SW | AR_TRIG_SMP_PL_SW)) === 0;
+
+            if (!beyond) {
+              if (isOn || isLockTrig) activeSteps[pageIdx] = true;
+              if (isOn && isSlide)    slideSteps[pageIdx]  = true;
+            }
+
+            const cell = document.createElement('div');
+            let cls = 'step';
+
+            if (isLockTrig) {
+              cls += ' lock-trig';
+              if (hasPlock) cls += ' has-plock';
+            } else if (isOn) {
+              cls += ' on';
+              if (isAccent && !isMute) cls += ' accent';
+              if (isMute)              cls += ' mute';
+              if (hasPlock)            cls += ' has-plock';
+            }
+            if (hasSoundLock) cls += ' has-sound-lock';
+            if (beyond) cls += ' inactive';
+            cell.className = cls;
+            cell.dataset.step = stepIdx;
+
+            if (isOn) {
+              if (isRetrig) { const d = document.createElement('div'); d.className = 'trig-dot retrig'; cell.appendChild(d); }
+              if (hasSwing && swingAmount !== 0) { const d = document.createElement('div'); d.className = 'trig-dot swing'; cell.appendChild(d); }
+            }
+            if ((isOn || isLockTrig) && microSigned !== 0) {
+              const arr = document.createElement('div');
+              arr.className = 'utime-arrow ' + (microSigned > 0 ? 'late' : 'early');
+              cell.appendChild(arr);
+            }
+            // Note length bar — only on triggered steps (lock-trigs don't sound)
+            if (isOn && !beyond) {
+              const defLen = S.lastRaw[trackBase + DEFAULT_NOTE_LEN_OFFSET];
+              const lenDisp = lenRaw !== 0xFF ? lenRaw : defLen;
+              if (lenDisp === 0x7F) {
+                const bar = document.createElement('div');
+                bar.className = 'note-len-bar inf';
+                cell.appendChild(bar);
+              } else if (lenDisp !== 0xFF) {
+                const bar = document.createElement('div');
+                bar.className = 'note-len-bar';
+                bar.style.width = Math.round(lenDisp / 126 * 100) + '%';
+                cell.appendChild(bar);
+              }
+            }
+
+            // Tooltip
+            const modParts = [];
+            if (hasPlock) modParts.push('PLOCK');
+            if (isAccent) modParts.push('ACCENT');
+            if (isMute)   modParts.push('MUTE');
+            if (isRetrig) modParts.push('RETRIG');
+            if (hasSwing && swingAmount !== 0) modParts.push('SWING');
+            if (isSlide)      modParts.push('SLIDE');
+            if (hasSoundLock) {
+              let sndTip = 'SND:' + (sndLock + 1);
+              if (S.soundPool.has(sndLock)) {
+                const ps = S.soundPool.get(sndLock);
+                if (ps.length > MACHINE_TYPE_OFFSET) {
+                  const mt = ps[MACHINE_TYPE_OFFSET];
+                  if (mt < MACHINE_NAMES.length) sndTip += ' ' + MACHINE_NAMES[mt];
+                }
+              }
+              modParts.push(sndTip);
+            }
+            cell.title = TRACK_NAMES[t] + ' · step ' + (stepIdx + 1)
+              + (isLockTrig ? ' · LOCK' : isOn ? ' · TRIG' : '')
+              + (modParts.length ? ' [' + modParts.join(', ') + ']' : '')
+              + (beyond ? ' · beyond' : '')
+              + '\nclick: trig · alt: lock · shift: mute · ⌘: inspect';
+
+            cell.addEventListener('click', (e) => {
+              if (beyond || !S.lastRaw) return;
+              e.preventDefault();
+
+              // Cmd/Ctrl+click → open/close step inspector panel
+              if (e.metaKey || e.ctrlKey) {
+                if (S.openPanel && S.openPanel.t === t && S.openPanel.s === stepIdx) {
+                  closeStepPanel();
+                } else {
+                  openStepPanel(t, stepIdx);
+                }
+                return;
+              }
+
+              const curFlags  = getTrigFlags(trigBits, stepIdx);
+              const curOn     = (curFlags & AR_TRIG_ENABLE) !== 0;
+              const SYN_SMP   = AR_TRIG_SYN_PL_SW | AR_TRIG_SMP_PL_SW;
+
+              // Read track's default trig flags (s_u16_t, big-endian)
+              const dtfHi = S.lastRaw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET];
+              const dtfLo = S.lastRaw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET + 1];
+              const defTrigFlags = (dtfHi << 8) | dtfLo;
+
+              if (e.shiftKey) {
+                // Shift+click → toggle mute (only meaningful on active trigs)
+                if (curOn) {
+                  setTrigFlags(trigBits, stepIdx, curFlags ^ AR_TRIG_MUTE);
+                  refreshAfterEdit();
+                }
+                return;
+              }
+
+              if (e.altKey) {
+                // Alt+click → toggle lock trig
+                const SYN_SMP_EN = AR_TRIG_SYN_PL_EN | AR_TRIG_SMP_PL_EN;
+                if (!curOn) {
+                  // Off → enable as lock trig: use defaults but clear SYN+SMP
+                  // Set PL_EN so the AR uses the per-step switch state
+                  const base = curFlags === 0 ? defTrigFlags : curFlags;
+                  setTrigFlags(trigBits, stepIdx,
+                    (base | AR_TRIG_ENABLE | SYN_SMP_EN) & ~SYN_SMP);
+                } else if ((curFlags & SYN_SMP) !== 0) {
+                  // Normal trig → lock trig (clear SYN+SMP, set PL_EN)
+                  setTrigFlags(trigBits, stepIdx,
+                    (curFlags | SYN_SMP_EN) & ~SYN_SMP);
+                } else {
+                  // Lock trig → off (clear enable, leave other flags)
+                  setTrigFlags(trigBits, stepIdx, curFlags & ~AR_TRIG_ENABLE);
+                }
+                refreshAfterEdit();
+                return;
+              }
+
+              // Regular click → toggle trig
+              if (curOn) {
+                // On → off: clear enable only, leave other flags
+                setTrigFlags(trigBits, stepIdx, curFlags & ~AR_TRIG_ENABLE);
+              } else {
+                // Off → on: use default trig flags for fresh steps
+                let nf;
+                if (curFlags === 0) {
+                  // Fresh step → use track's default trig flags
+                  nf = defTrigFlags | AR_TRIG_ENABLE;
+                } else {
+                  // Had previous flags → restore with ENABLE
+                  nf = curFlags | AR_TRIG_ENABLE;
+                  if ((nf & SYN_SMP) === 0) {
+                    // Was a lock trig → restore as normal trig:
+                    // set SYN+SMP switches ON, clear their PL_EN bits
+                    nf = (nf | SYN_SMP) & ~(AR_TRIG_SYN_PL_EN | AR_TRIG_SMP_PL_EN);
+                  }
+                }
+                setTrigFlags(trigBits, stepIdx, nf);
+              }
+              refreshAfterEdit();
+            });
+
+              beat.appendChild(cell);
+            } // end step loop
+            grp.appendChild(beat);
+          } // end beat loop
+          stepsWrap.appendChild(grp);
+        }
+
+        stepsOuter.appendChild(stepsWrap);
+
+        // ── Slide lines ───────────────────────────────────────────────────
+        for (let i = 0; i < 32; i++) {
+          if (!slideSteps[i]) continue;
+          for (let j = i + 1; j < 32; j++) {
+            if (activeSteps[j]) {
+              const x1 = stepCenterX(i);
+              const x2 = stepCenterX(j);
+              const line = document.createElement('div');
+              line.className = 'slide-line';
+              line.style.left  = x1 + 'px';
+              line.style.width = (x2 - x1) + 'px';
+              stepsOuter.appendChild(line);
+              break;
+            }
+          }
+        }
+
+        row.appendChild(stepsOuter);
+        U.gridEl.appendChild(row);
+      }
+    }
+
+    // ─── Step inspector panel ─────────────────────────────────────────────────
+
+    function openStepPanel(t, s) {
+      closeStepPanel();
+
+      const trackRow = U.gridEl.querySelector(`.track-row[data-track="${t}"]`);
+      if (!trackRow) return;
+
+      const panel = buildStepPanel(t, s);
+      U.gridEl.insertBefore(panel, trackRow);
+      S.openPanel = { t, s, el: panel };
+
+      // Highlight the inspected step cell
+      const stepEl = trackRow.querySelector(`.step[data-step="${s}"]`);
+      if (stepEl) stepEl.classList.add('inspected');
+    }
+
+    function closeStepPanel() {
+      if (!S.openPanel) return;
+      // Remove highlight
+      const trackRow = U.gridEl.querySelector(`.track-row[data-track="${S.openPanel.t}"]`);
+      if (trackRow) {
+        const stepEl = trackRow.querySelector(`.step[data-step="${S.openPanel.s}"]`);
+        if (stepEl) stepEl.classList.remove('inspected');
+      }
+      S.openPanel.el.remove();
+      S.openPanel = null;
+    }
+
+    // ─── Track settings panel ───────────────────────────────────────────────
+
+    function openTrackSettingsPanel(t) {
+      closeTrackPanel();
+      const trackRow = U.gridEl.querySelector(`.track-row[data-track="${t}"]`);
+      if (!trackRow) return;
+      const panel = buildTrackSettingsPanel(t);
+      U.gridEl.insertBefore(panel, trackRow);
+      S.openTrackPanel = { t, el: panel };
+    }
+
+    function closeTrackPanel() {
+      if (!S.openTrackPanel) return;
+      S.openTrackPanel.el.remove();
+      S.openTrackPanel = null;
+    }
+
+    function buildTrackSettingsPanel(t) {
+      if (!S.lastRaw) return document.createElement('div');
+      const trackBase = 4 + t * TRACK_V5_SZ;
+      const raw = S.lastRaw;
+
+      const panel = document.createElement('div');
+      panel.className = 'track-settings-panel';
+
+      // Title
+      const title = document.createElement('span');
+      title.className = 'ts-title';
+      const machType = getTrackMachineType(t);
+      title.textContent = TRACK_NAMES[t] +
+        (machType !== null ? ' · ' + MACHINE_NAMES[machType] : '');
+      panel.appendChild(title);
+
+      // Inline editable value helper
+      const addVal = (lbl, displayText, editVal, width, onCommit) => {
+        const grp = document.createElement('span');
+        grp.className = 'ts-group';
+        const label = document.createElement('span');
+        label.className = 'ts-lbl';
+        label.textContent = lbl;
+        const v = document.createElement('span');
+        v.className = 'ts-val';
+        v.textContent = displayText;
+        grp.appendChild(label);
+        grp.appendChild(v);
+        panel.appendChild(grp);
+
+        v.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (v.querySelector('input')) return;
+          const inp = document.createElement('input');
+          inp.type = 'number';
+          inp.className = 'ts-input';
+          inp.style.width = width || '40px';
+          inp.value = editVal;
+          v.textContent = '';
+          v.appendChild(inp);
+          inp.focus();
+          inp.select();
+          let done = false;
+          const commit = () => {
+            if (done) return;
+            done = true;
+            onCommit(inp.value);
+          };
+          const cancel = () => {
+            if (done) return;
+            done = true;
+            v.textContent = displayText;
+          };
+          inp.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter')  { ke.preventDefault(); commit(); }
+            if (ke.key === 'Escape') { ke.preventDefault(); cancel(); }
+            ke.stopPropagation();
+          });
+          inp.addEventListener('blur', () => {
+            setTimeout(() => { if (!done) commit(); }, 0);
+          });
+        });
+      };
+
+      // Scale mode check
+      const tsScaleMode = raw.length > SCALE_MODE_OFFSET ? raw[SCALE_MODE_OFFSET] : 0;
+
+      // Scale section: Normal → "Std", Advanced → Len + Spd
+      const numSteps = raw[trackBase + NUM_STEPS_OFFSET];
+      const tsDenom = (n) => n <= 16 ? 16 : n <= 32 ? 32 : n <= 48 ? 48 : 64;
+      const speedByte = raw[trackBase + TRACK_SPEED_OFFSET];
+      const speedIdx  = speedByte & 0x07;
+      const tsMakeArrow = (text, handler) => {
+        const b = document.createElement('span');
+        b.textContent = text; b.className = 'ts-arrow';
+        b.addEventListener('click', (e) => { e.stopPropagation(); handler(); refreshAfterEdit(); });
+        return b;
+      };
+
+      if (!tsScaleMode) {
+        // Normal mode: just "Std"
+        const grp = document.createElement('span');
+        grp.className = 'ts-group';
+        const lbl = document.createElement('span');
+        lbl.className = 'ts-lbl'; lbl.textContent = 'Scale';
+        const val = document.createElement('span');
+        val.className = 'ts-val'; val.style.cursor = 'default'; val.textContent = 'Std';
+        grp.appendChild(lbl); grp.appendChild(val);
+        panel.appendChild(grp);
+      } else {
+        // Advanced: Len N/D with text + arrows
+        const lenGrp = document.createElement('span');
+        lenGrp.className = 'ts-group';
+        const lenLbl = document.createElement('span');
+        lenLbl.className = 'ts-lbl'; lenLbl.textContent = 'Len';
+        const lenVal = document.createElement('span');
+        lenVal.className = 'ts-val'; lenVal.textContent = String(numSteps);
+        lenGrp.appendChild(lenLbl); lenGrp.appendChild(lenVal);
+        lenGrp.appendChild(tsMakeArrow('▼', () => {
+          let n = raw[trackBase + NUM_STEPS_OFFSET]; n = n <= 1 ? 64 : n - 1;
+          raw[trackBase + NUM_STEPS_OFFSET] = n;
+        }));
+        lenGrp.appendChild(tsMakeArrow('▲', () => {
+          let n = raw[trackBase + NUM_STEPS_OFFSET]; n = n >= 64 ? 1 : n + 1;
+          raw[trackBase + NUM_STEPS_OFFSET] = n;
+        }));
+        panel.appendChild(lenGrp);
+        // Text entry on click
+        lenVal.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (lenVal.querySelector('input')) return;
+          const inp = document.createElement('input');
+          inp.type = 'number'; inp.className = 'ts-input'; inp.style.width = '40px';
+          inp.value = numSteps;
+          lenVal.textContent = ''; lenVal.appendChild(inp);
+          inp.focus(); inp.select();
+          let done = false;
+          const commit = () => {
+            if (done) return; done = true;
+            const n = parseInt(inp.value, 10);
+            if (!isNaN(n) && n >= 1 && n <= 64) raw[trackBase + NUM_STEPS_OFFSET] = n;
+            refreshAfterEdit();
+          };
+          const cancel = () => { if (done) return; done = true; refreshAfterEdit(); };
+          inp.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter') { ke.preventDefault(); commit(); }
+            if (ke.key === 'Escape') { ke.preventDefault(); cancel(); }
+            ke.stopPropagation();
+          });
+          inp.addEventListener('blur', () => { setTimeout(() => { if (!done) commit(); }, 0); });
+        });
+
+        // Advanced: Spd arrows-only
+        const spdGrp = document.createElement('span');
+        spdGrp.className = 'ts-group';
+        const spdLbl = document.createElement('span');
+        spdLbl.className = 'ts-lbl'; spdLbl.textContent = 'Spd';
+        const spdVal = document.createElement('span');
+        spdVal.className = 'ts-val'; spdVal.style.cursor = 'default';
+        spdVal.textContent = TRACK_SPEED_LABELS[speedIdx] || '1x';
+        spdGrp.appendChild(spdLbl); spdGrp.appendChild(spdVal);
+        spdGrp.appendChild(tsMakeArrow('▼', () => {
+          const cur = raw[trackBase + TRACK_SPEED_OFFSET] & 0x07;
+          raw[trackBase + TRACK_SPEED_OFFSET] = (speedByte & 0xF8) | (cur === 0 ? 6 : cur - 1);
+        }));
+        spdGrp.appendChild(tsMakeArrow('▲', () => {
+          const cur = raw[trackBase + TRACK_SPEED_OFFSET] & 0x07;
+          raw[trackBase + TRACK_SPEED_OFFSET] = (speedByte & 0xF8) | (cur >= 6 ? 0 : cur + 1);
+        }));
+        panel.appendChild(spdGrp);
+      }
+
+      // ── Separator between scale and trig defaults ──
+      const sep = document.createElement('span');
+      sep.className = 'ts-separator';
+      panel.appendChild(sep);
+
+      // Default Note
+      const defNote = raw[trackBase + DEFAULT_NOTE_OFFSET];
+      addVal('Note', midiNoteToName(defNote), defNote, '40px', (val) => {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n >= 0 && n <= 127) raw[trackBase + DEFAULT_NOTE_OFFSET] = n;
+        refreshAfterEdit();
+      });
+
+      // Default Velocity
+      const defVelo = raw[trackBase + DEFAULT_VELOCITY_OFFSET];
+      addVal('Vel', String(defVelo), defVelo, '40px', (val) => {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n >= 0 && n <= 127) raw[trackBase + DEFAULT_VELOCITY_OFFSET] = n;
+        refreshAfterEdit();
+      });
+
+      // Default Note Length
+      const defLen = raw[trackBase + DEFAULT_NOTE_LEN_OFFSET];
+      addVal('NLen', noteLenStr(defLen), defLen, '40px', (val) => {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n >= 0 && n <= 127) raw[trackBase + DEFAULT_NOTE_LEN_OFFSET] = n;
+        refreshAfterEdit();
+      });
+
+      // Default Trig Flags
+      const defFlagsHi = raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET];
+      const defFlagsLo = raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET + 1];
+      const defFlags   = (defFlagsHi << 8) | defFlagsLo;
+
+      const flagGrp = document.createElement('span');
+      flagGrp.className = 'ts-group';
+      const flagLbl = document.createElement('span');
+      flagLbl.className = 'ts-lbl';
+      flagLbl.textContent = 'Flags';
+      flagGrp.appendChild(flagLbl);
+
+      const flagDefs = [
+        { lbl: 'SYN', bit: AR_TRIG_SYN_PL_SW },
+        { lbl: 'SMP', bit: AR_TRIG_SMP_PL_SW },
+        { lbl: 'ENV', bit: AR_TRIG_ENV_PL_SW },
+        { lbl: 'LFO', bit: AR_TRIG_LFO_PL_SW },
+      ];
+      for (const f of flagDefs) {
+        const el = document.createElement('span');
+        el.className = 'ts-flag' + ((defFlags & f.bit) ? ' on' : '');
+        el.textContent = f.lbl;
+        el.title = 'Default ' + f.lbl + ((defFlags & f.bit) ? ' ON' : ' OFF');
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const nf = defFlags ^ f.bit;
+          raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET]     = (nf >> 8) & 0xFF;
+          raw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET + 1] = nf & 0xFF;
+          refreshAfterEdit();
+        });
+        flagGrp.appendChild(el);
+      }
+      panel.appendChild(flagGrp);
+
+      return panel;
+    }
+
+    function buildStepPanel(t, s) {
+      const trackBase = 4 + t * TRACK_V5_SZ;
+      const trigBits  = S.lastRaw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
+      const flags     = getTrigFlags(trigBits, s);
+      const isOn      = (flags & AR_TRIG_ENABLE) !== 0;
+      const spScaleMode = S.lastRaw.length > SCALE_MODE_OFFSET ? S.lastRaw[SCALE_MODE_OFFSET] : 0;
+      const spMasterLenRaw = S.lastRaw.length > MASTER_LENGTH_OFFSET + 1
+        ? (S.lastRaw[MASTER_LENGTH_OFFSET] << 8) | S.lastRaw[MASTER_LENGTH_OFFSET + 1] : 1;
+      const spMasterSteps = (spMasterLenRaw === 0 || spMasterLenRaw === 1) ? 64 : Math.min(spMasterLenRaw, 64);
+      const numSteps  = spScaleMode ? S.lastRaw[trackBase + NUM_STEPS_OFFSET] : spMasterSteps;
+      const beyond    = s >= numSteps;
+      const SYN_SMP_EN = AR_TRIG_SYN_PL_EN | AR_TRIG_SMP_PL_EN;
+      const isLockTrig = !beyond && isOn &&
+        (flags & SYN_SMP_EN) === SYN_SMP_EN &&
+        (flags & (AR_TRIG_SYN_PL_SW | AR_TRIG_SMP_PL_SW)) === 0;
+      const trigType = beyond ? 'BEYOND' : isLockTrig ? 'PARAMETER LOCK' : isOn ? 'TRIG' : 'EMPTY';
+
+      // Determine machine type: sound-locked → pool sound, else → kit
+      const sndLock = S.lastRaw[trackBase + SOUND_LOCK_OFFSET + s];
+      const hasSoundLock = sndLock !== 0xFF;
+      let stepMachineType = getTrackMachineType(t);
+      let poolSound = null;
+      if (hasSoundLock && S.soundPool.has(sndLock)) {
+        poolSound = S.soundPool.get(sndLock);
+        if (poolSound.length > MACHINE_TYPE_OFFSET) {
+          const mt = poolSound[MACHINE_TYPE_OFFSET];
+          if (mt < MACHINE_NAMES.length) stepMachineType = mt;
+        }
+      }
+
+      const machName = (stepMachineType !== null) ? MACHINE_NAMES[stepMachineType] : '';
+
+      const panel = document.createElement('div');
+      panel.className = 'step-panel';
+
+      // Header
+      const hdr = document.createElement('div');
+      hdr.className = 'sp-header';
+      const title = document.createElement('span');
+      title.textContent = TRACK_NAMES[t] + ' · Step ' + (s + 1) + ' · ' + trigType
+        + (machName ? ' · ' + machName : '');
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'sp-close';
+      closeBtn.textContent = '×';
+      closeBtn.addEventListener('click', closeStepPanel);
+      hdr.appendChild(title);
+      hdr.appendChild(closeBtn);
+      panel.appendChild(hdr);
+
+      // Sections row
+      const secs = document.createElement('div');
+      secs.className = 'sp-sections';
+
+      secs.appendChild(buildFlagsSection(flags, t, s));
+      secs.appendChild(buildTrigSection(t, s, flags));
+      secs.appendChild(buildRetrigSection(t, s, flags));
+      if (t === 12) {
+        for (const secKey of FX_SECTION_KEYS) {
+          secs.appendChild(buildFxParamSection(secKey, t, s));
+        }
+      } else {
+        for (const secKey of SECTION_KEYS) {
+          secs.appendChild(buildParamSection(secKey, t, s, stepMachineType, poolSound));
+        }
+      }
+
+      panel.appendChild(secs);
+      return panel;
+    }
+
+    // FLAGS section: ACC / MUT / SWG / SLD / RTG
+    function buildFlagsSection(flags, t, s) {
+      const flagDefs = [
+        { lbl: 'ACC', bit: AR_TRIG_ACCENT },
+        { lbl: 'MUT', bit: AR_TRIG_MUTE   },
+        { lbl: 'SWG', bit: AR_TRIG_SWING  },
+        { lbl: 'SLD', bit: AR_TRIG_SLIDE  },
+        { lbl: 'RTG', bit: AR_TRIG_RETRIG },
+      ];
+      const body = document.createElement('div');
+      body.className = 'sp-flags';
+      for (const f of flagDefs) {
+        const on = (flags & f.bit) !== 0;
+        const el = document.createElement('div');
+        el.className = 'sp-flag' + (on ? ' on' : '');
+        el.textContent = f.lbl;
+        el.addEventListener('click', () => toggleTrigFlag(t, s, f.bit));
+        body.appendChild(el);
+      }
+      return makeSec('FLAGS', body);
+    }
+
+    // ─── Pattern metadata display (editable) ─────────────────────────────────
+
+    function renderMeta() {
+      if (!S.lastRaw) return;
+      const raw = S.lastRaw;
+      U.metaEl.textContent = '';
+
+      // Helper: read-only label
+      const addLabel = (lbl, val, target) => {
+        const s = document.createElement('span');
+        s.innerHTML = lbl + ': <span>' + val + '</span>';
+        (target || U.metaEl).appendChild(s);
+      };
+
+      // Helper: editable field
+      const addField = (lbl, displayVal, editVal, onCommit, inputOpts, target) => {
+        const wrap = document.createElement('span');
+        const label = document.createTextNode(lbl + ': ');
+        const v = document.createElement('span');
+        v.className = 'meta-val editable';
+        v.textContent = displayVal;
+        wrap.appendChild(label);
+        wrap.appendChild(v);
+        (target || U.metaEl).appendChild(wrap);
+
+        v.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (v.querySelector('input')) return;
+          const inp = document.createElement('input');
+          inp.type = 'text';
+          inp.className = 'meta-input';
+          inp.value = editVal;
+          if (inputOpts && inputOpts.width) inp.style.width = inputOpts.width;
+          v.textContent = '';
+          v.appendChild(inp);
+          inp.focus();
+          inp.select();
+
+          let done = false;
+          const commit = () => {
+            if (done) return;
+            done = true;
+            onCommit(inp.value);
+          };
+          const cancel = () => {
+            if (done) return;
+            done = true;
+            v.textContent = displayVal;
+          };
+          inp.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter')  { ke.preventDefault(); commit(); }
+            if (ke.key === 'Escape') { ke.preventDefault(); cancel(); }
+            ke.stopPropagation();
+          });
+          inp.addEventListener('blur', () => {
+            setTimeout(() => { if (!done) commit(); }, 0);
+          });
+        });
+      };
+
+      // Step denominator: ≤16→16, ≤32→32, ≤48→48, else 64
+      const stepDenom = (n) => n <= 16 ? 16 : n <= 32 ? 32 : n <= 48 ? 48 : 64;
+
+      // Helper: arrows-only field (no text entry)
+      const addArrowField = (lbl, displayVal, onDown, onUp, target) => {
+        const wrap = document.createElement('span');
+        wrap.appendChild(document.createTextNode(lbl + ': '));
+        const v = document.createElement('span');
+        v.className = 'meta-val';
+        v.textContent = displayVal;
+        wrap.appendChild(v);
+        const makeBtn = (text, handler) => {
+          const b = document.createElement('span');
+          b.textContent = text;
+          b.className = 'meta-arrow';
+          b.addEventListener('click', (e) => { e.stopPropagation(); handler(); refreshAfterEdit(); });
+          return b;
+        };
+        wrap.appendChild(makeBtn('▼', onDown));
+        wrap.appendChild(makeBtn('▲', onUp));
+                (target || U.metaEl).appendChild(wrap);
+      };
+
+      // Helper: slider + text entry field
+      const addSliderField = (lbl, value, min, max, offLabel, onCommit, target) => {
+        const wrap = document.createElement('span');
+        wrap.appendChild(document.createTextNode(lbl + ': '));
+        const v = document.createElement('span');
+        v.className = 'meta-val editable';
+        v.textContent = value === 0 ? offLabel : String(value);
+        wrap.appendChild(v);
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.className = 'meta-slider';
+        slider.min = min; slider.max = max; slider.value = value;
+        slider.addEventListener('input', () => {
+          const n = parseInt(slider.value, 10);
+          onCommit(n);
+          v.textContent = n === 0 ? offLabel : String(n);
+        });
+        slider.addEventListener('change', () => refreshAfterEdit());
+        wrap.appendChild(slider);
+                (target || U.metaEl).appendChild(wrap);
+
+        v.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (v.querySelector('input')) return;
+          const inp = document.createElement('input');
+          inp.type = 'text';
+          inp.className = 'meta-input';
+          inp.style.width = '36px';
+          inp.value = value === 0 ? offLabel : String(value);
+          v.textContent = '';
+          v.appendChild(inp);
+          inp.focus(); inp.select();
+          let done = false;
+          const commit = () => {
+            if (done) return; done = true;
+            const upper = inp.value.trim().toUpperCase();
+            let n;
+            if (upper === offLabel || upper === '0' || upper === '') n = 0;
+            else { n = parseInt(upper, 10); if (isNaN(n) || n < min) n = min; if (n > max) n = max; }
+            onCommit(n);
+            refreshAfterEdit();
+          };
+          const cancel = () => { if (done) return; done = true; v.textContent = value === 0 ? offLabel : String(value); };
+          inp.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter')  { ke.preventDefault(); commit(); }
+            if (ke.key === 'Escape') { ke.preventDefault(); cancel(); }
+            ke.stopPropagation();
+          });
+          inp.addEventListener('blur', () => { setTimeout(() => { if (!done) commit(); }, 0); });
+        });
+      };
+
+      // Helper: add ▼▲ arrows to the last appended field
+      const addArrows = (container, onDown, onUp) => {
+        const wrap = container.lastElementChild;
+        const makeBtn = (text, handler) => {
+          const b = document.createElement('span');
+          b.textContent = text;
+          b.className = 'meta-arrow';
+          b.addEventListener('click', (e) => { e.stopPropagation(); handler(); refreshAfterEdit(); });
+          return b;
+        };
+        wrap.appendChild(makeBtn('▼', onDown));
+        wrap.appendChild(makeBtn('▲', onUp));
+      };
+
+      // ── Line 1: Pattern, Kit, BPM, Swing ────────────────────────────
+      const line1 = document.createElement('span');
+      line1.className = 'meta-line';
+      U.metaEl.appendChild(line1);
+
+      // Pattern name (read-only)
+      addLabel('Pattern', S.lastPatName, line1);
+
+      // Kit number: 0-127 → 1-128, 0xFF → unassigned
+      const kitNum = raw.length > KIT_NUMBER_OFFSET ? raw[KIT_NUMBER_OFFSET] : 0xFF;
+      const kitStr = (kitNum === 0xFF) ? '—' : String(kitNum + 1).padStart(2, '0');
+      addField('Kit', kitStr, kitNum === 0xFF ? '' : kitNum + 1, (val) => {
+        const n = parseInt(val, 10);
+        if (!isNaN(n) && n >= 1 && n <= 128) {
+          raw[KIT_NUMBER_OFFSET] = n - 1;
+        } else {
+          raw[KIT_NUMBER_OFFSET] = 0xFF;
+        }
+        refreshAfterEdit();
+      }, {}, line1);
+      addArrows(line1,
+        () => { const c = raw[KIT_NUMBER_OFFSET]; let n = (c === 0xFF ? 0 : c) - 1; if (n < 0) n = 127; raw[KIT_NUMBER_OFFSET] = n; },
+        () => { const c = raw[KIT_NUMBER_OFFSET]; let n = (c === 0xFF ? 0 : c) + 1; if (n > 127) n = 0; raw[KIT_NUMBER_OFFSET] = n; }
+      );
+
+      // BPM: 16-bit BE, rawValue = BPM × 120
+      const bpmRaw = raw.length > BPM_LSB_OFFSET
+        ? (raw[BPM_MSB_OFFSET] << 8) | raw[BPM_LSB_OFFSET] : 0;
+      const bpmStr = bpmRaw ? (bpmRaw / 120).toFixed(1) : '—';
+      addField('BPM', bpmStr, bpmRaw ? (bpmRaw / 120).toFixed(1) : '120.0', (val) => {
+        const bpm = parseFloat(val);
+        if (!isNaN(bpm) && bpm >= 30 && bpm <= 300) {
+          const rv = Math.round(bpm * 120);
+          raw[BPM_MSB_OFFSET] = (rv >> 8) & 0xFF;
+          raw[BPM_LSB_OFFSET] = rv & 0xFF;
+        }
+        refreshAfterEdit();
+      }, { width: '52px' }, line1);
+
+      // Swing: raw 0-30, displayed as 50-80%
+      const swingAmt = raw.length > SWING_AMOUNT_OFFSET ? raw[SWING_AMOUNT_OFFSET] : 0;
+      addField('Swing', (50 + swingAmt) + '%', 50 + swingAmt, (val) => {
+        let n = parseInt(val, 10);
+        if (isNaN(n)) n = 50;
+        n = Math.max(50, Math.min(80, n));
+        raw[SWING_AMOUNT_OFFSET] = n - 50;
+        refreshAfterEdit();   // swing affects grid dot visibility
+      }, { width: '36px' }, line1);
+
+      // ── Line 2: Scale settings ───────────────────────────────────────
+      const line2 = document.createElement('span');
+      line2.className = 'meta-line';
+      U.metaEl.appendChild(line2);
+
+      // Scale mode: arrows-only toggle (NRM / ADV)
+      const scaleMode = raw.length > SCALE_MODE_OFFSET ? raw[SCALE_MODE_OFFSET] : 0;
+      const toggleScale = () => {
+        const wasAdv = raw[SCALE_MODE_OFFSET];
+        raw[SCALE_MODE_OFFSET] = wasAdv ? 0 : 1;
+        // Switching to normal: clamp master length to 2–64, sync per-track numSteps
+        if (wasAdv) {
+          let ml = (raw[MASTER_LENGTH_OFFSET] << 8) | raw[MASTER_LENGTH_OFFSET + 1];
+          // INF(1), 1024(0), or >64: clamp to 64
+          if (ml === 0 || ml === 1 || ml > 64) {
+            ml = 64;
+            raw[MASTER_LENGTH_OFFSET] = 0;
+            raw[MASTER_LENGTH_OFFSET + 1] = 64;
+          }
+          for (let t = 0; t < 13; t++)
+            raw[4 + t * TRACK_V5_SZ + NUM_STEPS_OFFSET] = ml;
+        }
+      };
+      addArrowField('Scale', scaleMode ? 'ADV' : 'NRM', toggleScale, toggleScale, line2);
+
+      // Master length: N/D with text entry for numerator, arrows
+      // Master length encoding: 0=1024, 1=INF, 2-1023=2-1023
+      let masterLenRaw = raw.length > MASTER_LENGTH_OFFSET + 1
+        ? (raw[MASTER_LENGTH_OFFSET] << 8) | raw[MASTER_LENGTH_OFFSET + 1] : 1;
+      // In normal mode, clamp out-of-range values to valid 2–64 range
+      if (!scaleMode && (masterLenRaw === 0 || masterLenRaw === 1 || masterLenRaw > 64)) {
+        masterLenRaw = 64;
+        raw[MASTER_LENGTH_OFFSET] = 0;
+        raw[MASTER_LENGTH_OFFSET + 1] = 64;
+      }
+      const masterLenDisp = masterLenRaw === 1 ? 'INF'
+        : (masterLenRaw === 0 ? '1024' : String(masterLenRaw));
+      {
+        const wrap = document.createElement('span');
+        wrap.appendChild(document.createTextNode('Len: '));
+        const v = document.createElement('span');
+        v.className = 'meta-val editable';
+        v.textContent = masterLenDisp;
+        wrap.appendChild(v);
+        if (masterLenRaw !== 1) {
+          const displayNum = masterLenRaw === 0 ? 1024 : masterLenRaw;
+          const suf = document.createElement('span');
+          suf.className = 'meta-suffix';
+          suf.textContent = '/' + stepDenom(displayNum);
+          wrap.appendChild(suf);
+        }
+        // Read/write helpers for master length
+        const readLen = () => raw.length > MASTER_LENGTH_OFFSET + 1
+          ? (raw[MASTER_LENGTH_OFFSET] << 8) | raw[MASTER_LENGTH_OFFSET + 1] : 1;
+        const writeLen = (n) => {
+          raw[MASTER_LENGTH_OFFSET] = (n >> 8) & 0xFF;
+          raw[MASTER_LENGTH_OFFSET + 1] = n & 0xFF;
+          // In normal mode, AR syncs all per-track numSteps to master length
+          if (!scaleMode) {
+            const perTrack = (n === 0 || n === 1) ? 64 : Math.min(n, 64);
+            for (let t = 0; t < 13; t++)
+              raw[4 + t * TRACK_V5_SZ + NUM_STEPS_OFFSET] = perTrack;
+          }
+        };
+        // Text entry on click (numerator only)
+        v.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (v.querySelector('input')) return;
+          const inp = document.createElement('input');
+          inp.type = 'text'; inp.className = 'meta-input'; inp.style.width = '40px';
+          inp.value = masterLenDisp;
+          v.textContent = ''; v.appendChild(inp);
+          inp.focus(); inp.select();
+          let done = false;
+          const commit = () => {
+            if (done) return; done = true;
+            const upper = inp.value.trim().toUpperCase();
+            let n;  // raw value to store
+            if (!scaleMode) {
+              // Normal mode: 2–64 only
+              n = parseInt(upper, 10);
+              if (isNaN(n) || n < 2) n = 2;
+              if (n > 64) n = 64;
+            } else {
+              if (upper === 'INF' || upper === '') n = 1;
+              else { n = parseInt(upper, 10); if (isNaN(n) || n < 2) n = 1; if (n > 1024) n = 0; if (n === 1024) n = 0; }
+            }
+            writeLen(n);
+            refreshAfterEdit();
+          };
+          const cancel = () => { if (done) return; done = true; refreshAfterEdit(); };
+          inp.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter')  { ke.preventDefault(); commit(); }
+            if (ke.key === 'Escape') { ke.preventDefault(); cancel(); }
+            ke.stopPropagation();
+          });
+          inp.addEventListener('blur', () => { setTimeout(() => { if (!done) commit(); }, 0); });
+        });
+        const makeBtn = (text, handler) => {
+          const b = document.createElement('span');
+          b.textContent = text; b.className = 'meta-arrow';
+          b.addEventListener('click', (e) => { e.stopPropagation(); handler(); refreshAfterEdit(); });
+          return b;
+        };
+        wrap.appendChild(makeBtn('▼', () => {
+          const n = readLen();
+          if (!scaleMode) {
+            // Normal mode: 2–64 only
+            const cur = (n === 0 || n === 1) ? 64 : Math.min(n, 64);
+            if (cur > 2) writeLen(cur - 1);
+          } else {
+            if (n === 1) writeLen(0);       // INF → 1024
+            else if (n === 0) writeLen(1023); // 1024 → 1023
+            else if (n === 2) writeLen(1);   // 2 → INF
+            else writeLen(n - 1);
+          }
+        }));
+        wrap.appendChild(makeBtn('▲', () => {
+          const n = readLen();
+          if (!scaleMode) {
+            // Normal mode: 2–64 only
+            const cur = (n === 0 || n === 1) ? 64 : Math.min(n, 64);
+            if (cur < 64) writeLen(cur + 1);
+          } else {
+            if (n === 1) writeLen(2);        // INF → 2
+            else if (n === 1023) writeLen(0); // 1023 → 1024
+            else if (n === 0) writeLen(1);   // 1024 → INF
+            else writeLen(n + 1);
+          }
+        }));
+                line2.appendChild(wrap);
+      }
+
+      // Master change length: only shown in advanced mode
+      // Encoding: 0=1024, 1=OFF, 2-1023=2-1023
+      if (scaleMode) {
+        const chgRaw = raw.length > MASTER_CHG_OFFSET + 1
+          ? (raw[MASTER_CHG_OFFSET] << 8) | raw[MASTER_CHG_OFFSET + 1] : 1;
+        const chgDisp = chgRaw === 1 ? 'OFF'
+          : (chgRaw === 0 ? '1024' : String(chgRaw));
+        const chgWrap = document.createElement('span');
+        chgWrap.appendChild(document.createTextNode('Chg: '));
+        const chgV = document.createElement('span');
+        chgV.className = 'meta-val editable';
+        chgV.textContent = chgDisp;
+        chgWrap.appendChild(chgV);
+        // Text entry
+        chgV.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (chgV.querySelector('input')) return;
+          const inp = document.createElement('input');
+          inp.type = 'text'; inp.className = 'meta-input'; inp.style.width = '40px';
+          inp.value = chgDisp;
+          chgV.textContent = ''; chgV.appendChild(inp);
+          inp.focus(); inp.select();
+          let done = false;
+          const commit = () => {
+            if (done) return; done = true;
+            const upper = inp.value.trim().toUpperCase();
+            let n;
+            if (upper === 'OFF' || upper === '') n = 1;
+            else { n = parseInt(upper, 10); if (isNaN(n) || n < 2) n = 1; if (n >= 1024) n = 0; }
+            raw[MASTER_CHG_OFFSET] = (n >> 8) & 0xFF;
+            raw[MASTER_CHG_OFFSET + 1] = n & 0xFF;
+            refreshAfterEdit();
+          };
+          const cancel = () => { if (done) return; done = true; refreshAfterEdit(); };
+          inp.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter') { ke.preventDefault(); commit(); }
+            if (ke.key === 'Escape') { ke.preventDefault(); cancel(); }
+            ke.stopPropagation();
+          });
+          inp.addEventListener('blur', () => { setTimeout(() => { if (!done) commit(); }, 0); });
+        });
+        // Arrows: OFF(1) → 2 → ... → 1023 → 1024(0) → OFF(1)
+        const readChg = () => raw.length > MASTER_CHG_OFFSET + 1
+          ? (raw[MASTER_CHG_OFFSET] << 8) | raw[MASTER_CHG_OFFSET + 1] : 1;
+        const writeChg = (n) => { raw[MASTER_CHG_OFFSET] = (n >> 8) & 0xFF; raw[MASTER_CHG_OFFSET + 1] = n & 0xFF; };
+        const chgBtn = (text, handler) => {
+          const b = document.createElement('span');
+          b.textContent = text; b.className = 'meta-arrow';
+          b.addEventListener('click', (e) => { e.stopPropagation(); handler(); refreshAfterEdit(); });
+          return b;
+        };
+        chgWrap.appendChild(chgBtn('▼', () => {
+          const n = readChg();
+          if (n === 1) writeChg(0);
+          else if (n === 0) writeChg(1023);
+          else if (n === 2) writeChg(1);
+          else writeChg(n - 1);
+        }));
+        chgWrap.appendChild(chgBtn('▲', () => {
+          const n = readChg();
+          if (n === 1) writeChg(2);
+          else if (n === 1023) writeChg(0);
+          else if (n === 0) writeChg(1);
+          else writeChg(n + 1);
+        }));
+        line2.appendChild(chgWrap);
+      }
+
+      // Master speed: arrows-only
+      const masterSpd = raw.length > MASTER_SPEED_OFFSET ? raw[MASTER_SPEED_OFFSET] : 2;
+      addArrowField('Spd', TRACK_SPEED_LABELS[masterSpd] || '1x',
+        () => { let s = raw[MASTER_SPEED_OFFSET]; raw[MASTER_SPEED_OFFSET] = s === 0 ? 6 : s - 1; },
+        () => { let s = raw[MASTER_SPEED_OFFSET]; raw[MASTER_SPEED_OFFSET] = s >= 6 ? 0 : s + 1; },
+        line2
+      );
+    }
+
+    function refreshAfterEdit() {
+      const had = S.openPanel ? { t: S.openPanel.t, s: S.openPanel.s } : null;
+      const hadTrack = S.openTrackPanel ? { t: S.openTrackPanel.t } : null;
+      renderMeta();
+      renderGrid(S.lastRaw, S.stepPage);
+      if (had) openStepPanel(had.t, had.s);
+      if (hadTrack) openTrackSettingsPanel(hadTrack.t);
+    }
+
+    // Map from PL_SW bit → corresponding PL_EN bit
+    const PL_SW_TO_EN = {
+      [AR_TRIG_SYN_PL_SW]: AR_TRIG_SYN_PL_EN,
+      [AR_TRIG_SMP_PL_SW]: AR_TRIG_SMP_PL_EN,
+      [AR_TRIG_ENV_PL_SW]: AR_TRIG_ENV_PL_EN,
+      [AR_TRIG_LFO_PL_SW]: AR_TRIG_LFO_PL_EN,
+    };
+
+    function toggleTrigFlag(t, s, bit) {
+      if (!S.lastRaw) return;
+      const trackBase = 4 + t * TRACK_V5_SZ;
+      const trigBits  = S.lastRaw.subarray(trackBase + TRIG_BITS_OFFSET, trackBase + 112);
+      let flags     = getTrigFlags(trigBits, s);
+      const enBit = PL_SW_TO_EN[bit];
+      if (enBit) {
+        // Determine effective state: PL_EN ? PL_SW : track default
+        const dtfHi = S.lastRaw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET];
+        const dtfLo = S.lastRaw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET + 1];
+        const defFlags = (dtfHi << 8) | dtfLo;
+        const effectiveOn = (flags & enBit)
+          ? (flags & bit) !== 0
+          : (defFlags & bit) !== 0;
+        if (effectiveOn) {
+          // Turn OFF: set PL_EN, clear PL_SW
+          flags = (flags | enBit) & ~bit;
+        } else {
+          // Turn ON: set PL_EN, set PL_SW
+          flags = flags | enBit | bit;
+        }
+      } else {
+        flags ^= bit;
+      }
+      setTrigFlags(trigBits, s, flags);
+      refreshAfterEdit();
+    }
+
+    // TRIG section: NOTE, VELO, LEN, PROB, then SYN/SMP/ENV/LFO
+    // Returns the trig condition index (0–56, see TRIG_COND_NAMES) if a per-step
+    // trig condition is set, or null if the step plays unconditionally.
+    // Condition bits are packed across notes/micro_timings/retrig_lengths/retrig_rates
+    // (see ar_pattern_track_get_step_trig_condition in pattern.c).
+    // When notes[s] bit 7 = 1 → no condition; bit 7 = 0 → has condition.
+    function getTrigCondition(trackBase, s) {
+      const noteRaw = S.lastRaw[trackBase + NOTE_OFFSET + s];
+      if ((noteRaw & 0x80) !== 0) return null; // bit 7 = 1 → no condition
+      const microRaw  = S.lastRaw[trackBase + MICRO_TIMING_OFFSET + s];
+      const retLenRaw = S.lastRaw[trackBase + RETRIG_LENGTH_OFFSET + s];
+      const retRatRaw = S.lastRaw[trackBase + RETRIG_RATE_OFFSET + s];
+      let r = 0;
+      r  = (noteRaw   & 0x80) >> 1;  // bit 6  (always 0 for valid conditions 0-56)
+      r |= (microRaw  & 0xC0) >> 2;  // bits 5..4
+      r |= (retLenRaw & 0x80) >> 4;  // bit 3
+      r |= (retRatRaw & 0xE0) >> 5;  // bits 2..0
+      return r;
+    }
+
+    // Write a 7-bit trig condition, distributing bits across 4 byte arrays.
+    // val=null clears the condition (sets notes bit 7 = 1, no condition).
+    function setTrigCondition(trackBase, s, val) {
+      if (!S.lastRaw) return;
+      const nOff = trackBase + NOTE_OFFSET + s;
+      const mOff = trackBase + MICRO_TIMING_OFFSET + s;
+      const lOff = trackBase + RETRIG_LENGTH_OFFSET + s;
+      const rOff = trackBase + RETRIG_RATE_OFFSET + s;
+      if (val === null) {
+        // Clear condition: set notes bit 7 = 1
+        S.lastRaw[nOff] = S.lastRaw[nOff] | 0x80;
+        return;
+      }
+      // Distribute 7-bit value across scattered bits (matching C setter)
+      S.lastRaw[nOff] = (S.lastRaw[nOff] & ~0x80) | ((val & 0x40) << 1);
+      S.lastRaw[mOff] = (S.lastRaw[mOff] & ~0xC0) | ((val & 0x30) << 2);
+      S.lastRaw[lOff] = (S.lastRaw[lOff] & ~0x80) | ((val & 0x08) << 4);
+      S.lastRaw[rOff] = (S.lastRaw[rOff] & ~0xE0) | ((val & 0x07) << 5);
+    }
+
+    function buildTrigSection(t, s, flags) {
+      const trackBase = 4 + t * TRACK_V5_SZ;
+
+      const noteRaw  = S.lastRaw[trackBase + NOTE_OFFSET + s];
+      const defNote  = S.lastRaw[trackBase + DEFAULT_NOTE_OFFSET];
+      const noteLocked = (noteRaw !== 0xFF && noteRaw !== 0x7F);
+      const noteVal  = noteLocked ? midiNoteToName(noteRaw & 0x7F) : midiNoteToName(defNote);
+
+      const veloRaw  = S.lastRaw[trackBase + VELOCITY_OFFSET + s];
+      const defVelo  = S.lastRaw[trackBase + DEFAULT_VELOCITY_OFFSET];
+      const veloLocked = veloRaw !== 0xFF;
+      const veloVal  = veloLocked ? veloRaw : defVelo;
+
+      const lenRaw   = S.lastRaw[trackBase + NOTE_LEN_OFFSET + s];
+      const defLen   = S.lastRaw[trackBase + DEFAULT_NOTE_LEN_OFFSET];
+      const lenLocked = lenRaw !== 0xFF;
+      const lenVal   = noteLenStr(lenLocked ? lenRaw : defLen);
+
+      const prob     = S.lastRaw[trackBase + TRIG_PROBABILITY_OFFSET];
+
+      // Per-step trig condition overrides the track-level probability
+      const trigCond   = getTrigCondition(trackBase, s);
+      const probStr    = trigCond !== null
+        ? (TRIG_COND_NAMES[trigCond] ?? String(trigCond))
+        : (prob + '%');
+      const probLocked = trigCond !== null;
+
+      const sndLock  = S.lastRaw[trackBase + SOUND_LOCK_OFFSET + s];
+      const hasSnd   = sndLock !== 0xFF;
+
+      let sndDisplay = hasSnd ? (sndLock + 1) : 'TRK';
+      if (hasSnd && S.soundPool.has(sndLock)) {
+        const ps = S.soundPool.get(sndLock);
+        if (ps.length > MACHINE_TYPE_OFFSET) {
+          const mt = ps[MACHINE_TYPE_OFFSET];
+          if (mt < MACHINE_NAMES.length) sndDisplay = (sndLock + 1) + ' ' + MACHINE_NAMES[mt];
+        }
+      }
+
+      const body = document.createElement('div');
+      body.className = 'sp-params';
+
+      // Helper: write a byte to S.lastRaw and refresh
+      const writeByte = (off, val) => {
+        S.lastRaw[off] = val;
+        refreshAfterEdit();
+      };
+
+      // SND: 0-127 = pool slot, display as slot+1; clear = no lock (TRK)
+      const sndOff = trackBase + SOUND_LOCK_OFFSET + s;
+      const sndRawVal = hasSnd ? sndLock : 128;
+      const sndDispFn = (v) => {
+        if (v >= 128) return 'TRK';
+        let d = String(v + 1);
+        if (S.soundPool.has(v)) {
+          const ps = S.soundPool.get(v);
+          if (ps.length > MACHINE_TYPE_OFFSET) {
+            const mt = ps[MACHINE_TYPE_OFFSET];
+            if (mt < MACHINE_NAMES.length) d += ' ' + MACHINE_NAMES[mt];
+          }
+        }
+        return d;
+      };
+      body.appendChild(makeParamRow('SND', sndDisplay, hasSnd, {
+        min: 0, max: 128, rawVal: sndRawVal, displayFn: sndDispFn,
+        onChange: (v) => writeByte(sndOff, v >= 128 ? 0xFF : v),
+      }));
+
+      // NOTE: edit the 7-bit note value, preserve bit 7 (trig condition flag)
+      const noteOff = trackBase + NOTE_OFFSET + s;
+      const noteRawVal = noteLocked ? (noteRaw & 0x7F) : 128;
+      const noteEffective = noteLocked ? (noteRaw & 0x7F) : defNote;
+      body.appendChild(makeParamRow('NOTE', noteVal, noteLocked, {
+        min: 0, max: 128, rawVal: noteRawVal, initVal: noteEffective,
+        displayFn: (v) => v >= 128 ? 'TRK' : midiNoteToName(v),
+        onChange: (v) => {
+          if (v >= 128) { writeByte(noteOff, (noteRaw & 0x80) | 0x7F); }
+          else { writeByte(noteOff, (noteRaw & 0x80) | (v & 0x7F)); }
+        },
+      }));
+
+      // VELO: 0-127 = value, 128 = clear (use default)
+      const veloOff = trackBase + VELOCITY_OFFSET + s;
+      const veloRawVal = veloLocked ? veloRaw : 128;
+      body.appendChild(makeParamRow('VELO', veloVal, veloLocked, {
+        min: 0, max: 128, rawVal: veloRawVal, initVal: veloLocked ? veloRaw : defVelo,
+        displayFn: (v) => v >= 128 ? 'TRK' : v,
+        onChange: (v) => writeByte(veloOff, v >= 128 ? 0xFF : v),
+      }));
+
+      // LEN: 0-127 = value (127=∞), 128 = clear (use default)
+      const lenOff = trackBase + NOTE_LEN_OFFSET + s;
+      const lenRawVal = lenLocked ? lenRaw : 128;
+      body.appendChild(makeParamRow('LEN', lenVal, lenLocked, {
+        min: 0, max: 128, rawVal: lenRawVal, initVal: lenLocked ? lenRaw : defLen,
+        displayFn: (v) => v >= 128 ? 'TRK' : noteLenStr(v),
+        onChange: (v) => writeByte(lenOff, v >= 128 ? 0xFF : v),
+      }));
+
+      // PROB: trig condition (0-64 = conditions, 65 = TRK = use track probability)
+      const condCount = TRIG_COND_NAMES.length;  // 65 entries (0-64)
+      const probRawVal = probLocked ? trigCond : condCount;
+      const probDispFn = (v) => v >= condCount ? (prob + '%') : (TRIG_COND_NAMES[v] ?? String(v));
+      body.appendChild(makeParamRow('PROB', probStr, probLocked, {
+        min: 0, max: condCount, rawVal: probRawVal,
+        initVal: probLocked ? trigCond : condCount,
+        displayFn: probDispFn,
+        onChange: (v) => {
+          if (v >= condCount) {
+            setTrigCondition(trackBase, s, null);
+          } else {
+            setTrigCondition(trackBase, s, v);
+          }
+          refreshAfterEdit();
+        },
+      }));
+
+      // UTIME: -23..+23, stored in lower 6 bits, preserve upper bits (trig condition)
+      const microRaw    = S.lastRaw[trackBase + MICRO_TIMING_OFFSET + s];
+      const microVal    = microRaw & 0x3F;
+      const microSigned = (microVal & 0x20) ? microVal - 64 : microVal;
+      const utimeStr    = utimeFrac(microSigned);
+      const utimeDispFn = (v) => utimeFrac(v);
+      body.appendChild(makeParamRow('UTIME', utimeStr, microSigned !== 0, {
+        min: -23, max: 23, rawVal: microSigned, displayFn: utimeDispFn, snap: 0,
+        onChange: (v) => {
+          // Encode signed value into 6-bit field, preserve upper 2 bits
+          const enc = v < 0 ? (v + 64) & 0x3F : v & 0x3F;
+          S.lastRaw[trackBase + MICRO_TIMING_OFFSET + s] = (microRaw & 0xC0) | enc;
+          refreshAfterEdit();
+        },
+      }));
+
+      // SYN / SMP / ENV / LFO retrigger switches
+      // For SYN/SMP: effective state = PL_EN ? PL_SW : track default
+      const dtfHi = S.lastRaw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET];
+      const dtfLo = S.lastRaw[trackBase + DEFAULT_TRIG_FLAGS_OFFSET + 1];
+      const defFlags = (dtfHi << 8) | dtfLo;
+      const swDefs = [
+        { lbl: 'SYN', bit: AR_TRIG_SYN_PL_SW, en: AR_TRIG_SYN_PL_EN },
+        { lbl: 'SMP', bit: AR_TRIG_SMP_PL_SW, en: AR_TRIG_SMP_PL_EN },
+        { lbl: 'ENV', bit: AR_TRIG_ENV_PL_SW, en: AR_TRIG_ENV_PL_EN },
+        { lbl: 'LFO', bit: AR_TRIG_LFO_PL_SW, en: AR_TRIG_LFO_PL_EN },
+      ];
+      const swRow = document.createElement('div');
+      swRow.className = 'sp-sw-row';
+      for (const sw of swDefs) {
+        // Effective state: if PL_EN is set, use PL_SW; otherwise use track default
+        const on = (flags & sw.en)
+          ? (flags & sw.bit) !== 0
+          : (defFlags & sw.bit) !== 0;
+        const el = document.createElement('div');
+        el.className = 'sp-flag' + (on ? ' on' : '');
+        el.textContent = sw.lbl;
+        el.addEventListener('click', () => toggleTrigFlag(t, s, sw.bit));
+        swRow.appendChild(el);
+      }
+      body.appendChild(swRow);
+
+      return makeSec('TRIG', body);
+    }
+
+    // RETRIG section: RATE, LEN, VEL — always shown; highlighted when retrig is active
+    function buildRetrigSection(t, s, flags) {
+      const trackBase = 4 + t * TRACK_V5_SZ;
+      const isRetrig  = (flags & AR_TRIG_RETRIG) !== 0;
+
+      const rateRaw   = S.lastRaw[trackBase + RETRIG_RATE_OFFSET   + s] & 0x1F;
+      const lenRaw    = S.lastRaw[trackBase + RETRIG_LENGTH_OFFSET  + s] & 0x7F;
+      const velRaw    = S.lastRaw[trackBase + RETRIG_VELO_OFFSET    + s];
+      const velSigned = velRaw > 127 ? velRaw - 256 : velRaw;
+
+      const rateStr   = RETRIG_RATE_LABELS[rateRaw] ?? String(rateRaw);
+      const lenStr    = noteLenDisplay(noteLenVal(lenRaw));
+      const velStr    = (velSigned >= 0 ? '+' : '') + velSigned;
+
+      const body = document.createElement('div');
+      body.className = 'sp-params';
+
+      // RATE: 0-16, stored in lower 5 bits; preserve upper bits (trig condition)
+      const rateOff  = trackBase + RETRIG_RATE_OFFSET + s;
+      const rateFull = S.lastRaw[rateOff];
+      body.appendChild(makeParamRow('RATE', rateStr, isRetrig, {
+        min: 0, max: 16, rawVal: rateRaw,
+        displayFn: (v) => RETRIG_RATE_LABELS[v] ?? String(v),
+        onChange: (v) => {
+          S.lastRaw[rateOff] = (rateFull & 0xE0) | (v & 0x1F);
+          refreshAfterEdit();
+        },
+      }));
+
+      // LEN: 0-127, stored in lower 7 bits; preserve bit 7 (trig condition)
+      const lenOff2  = trackBase + RETRIG_LENGTH_OFFSET + s;
+      const lenFull  = S.lastRaw[lenOff2];
+      body.appendChild(makeParamRow('LEN', lenStr, isRetrig, {
+        min: 0, max: 127, rawVal: lenRaw,
+        displayFn: (v) => noteLenDisplay(noteLenVal(v)),
+        onChange: (v) => {
+          S.lastRaw[lenOff2] = (lenFull & 0x80) | (v & 0x7F);
+          refreshAfterEdit();
+        },
+      }));
+
+      // VEL: -128..+127, stored as unsigned byte interpreted as signed
+      const velOff = trackBase + RETRIG_VELO_OFFSET + s;
+      body.appendChild(makeParamRow('VEL', velStr, isRetrig && velSigned !== 0, {
+        min: -128, max: 127, rawVal: velSigned, snap: 0, snapR: 5,
+        displayFn: (v) => (v >= 0 ? '+' : '') + v,
+        onChange: (v) => {
+          S.lastRaw[velOff] = v < 0 ? v + 256 : v;
+          refreshAfterEdit();
+        },
+      }));
+
+      return makeSec('RETRIG', body);
+    }
+
+    // Write a plock value into S.lastRaw. Finds or allocates the plock sequence
+    // slot for the given track + param type. Deallocates if all steps become 0xFF.
+    function writePlock(t, pt, s, val) {
+      if (!S.lastRaw) return;
+      const end = PLOCK_SEQS_BASE + NUM_PLOCK_SEQS * PLOCK_SEQ_SZ;
+      if (S.lastRaw.length < end) return;
+
+      // Find existing slot for this track + param type
+      let slotBase = -1;
+      let freeBase = -1;
+      for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
+        const base = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
+        if (S.lastRaw[base] === pt && S.lastRaw[base + 1] === t) { slotBase = base; break; }
+        if (freeBase < 0 && S.lastRaw[base] === 0xFF) freeBase = base;
+      }
+
+      if (slotBase >= 0) {
+        // Existing slot — write the value
+        S.lastRaw[slotBase + 2 + s] = val;
+        // If all steps are now 0xFF, deallocate the slot
+        let allEmpty = true;
+        for (let i = 0; i < AR_NUM_STEPS; i++) {
+          if (S.lastRaw[slotBase + 2 + i] !== 0xFF) { allEmpty = false; break; }
+        }
+        if (allEmpty) { S.lastRaw[slotBase] = 0xFF; S.lastRaw[slotBase + 1] = 0xFF; }
+      } else if (val !== 0xFF && freeBase >= 0) {
+        // Allocate new slot
+        S.lastRaw[freeBase] = pt;
+        S.lastRaw[freeBase + 1] = t;
+        for (let i = 0; i < AR_NUM_STEPS; i++) S.lastRaw[freeBase + 2 + i] = 0xFF;
+        S.lastRaw[freeBase + 2 + s] = val;
+      }
+      // else: no slot found and val is 0xFF — nothing to do
+    }
+
+    // Clear the 0x80 fine companion for a coarse plock on a given step.
+    // Must be called BEFORE writePlock if the coarse slot may be deallocated.
+    function clearPlockFine(t, pt, s) {
+      if (!S.lastRaw) return;
+      for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
+        const base = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
+        if (S.lastRaw[base] === pt && S.lastRaw[base + 1] === t) {
+          // Found coarse slot; check if next slot is a 0x80 fine companion
+          const nextSi = si + 1;
+          if (nextSi < NUM_PLOCK_SEQS) {
+            const nb = PLOCK_SEQS_BASE + nextSi * PLOCK_SEQ_SZ;
+            if (S.lastRaw[nb] === 0x80 && S.lastRaw[nb + 1] === 0x80) {
+              S.lastRaw[nb + 2 + s] = 0xFF;
+              let allEmpty = true;
+              for (let i = 0; i < AR_NUM_STEPS; i++) {
+                if (S.lastRaw[nb + 2 + i] !== 0xFF) { allEmpty = false; break; }
+              }
+              if (allEmpty) { S.lastRaw[nb] = 0xFF; S.lastRaw[nb + 1] = 0xFF; }
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    // Write a fine value to the 0x80 companion of a coarse plock.
+    // Creates the companion if it doesn't exist (requires adjacent free slot).
+    function writePlockFine(t, pt, s, fineVal) {
+      if (!S.lastRaw) return;
+      // Find coarse slot
+      for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
+        const base = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
+        if (S.lastRaw[base] !== pt || S.lastRaw[base + 1] !== t) continue;
+
+        // Found coarse at si — check si+1 for companion
+        const nextSi = si + 1;
+        if (nextSi >= NUM_PLOCK_SEQS) return;
+        const nb = PLOCK_SEQS_BASE + nextSi * PLOCK_SEQ_SZ;
+
+        if (S.lastRaw[nb] === 0x80 && S.lastRaw[nb + 1] === 0x80) {
+          // Companion exists — update step value
+          S.lastRaw[nb + 2 + s] = fineVal;
+        } else if (S.lastRaw[nb] === 0xFF) {
+          // Next slot free — create companion
+          S.lastRaw[nb] = 0x80;
+          S.lastRaw[nb + 1] = 0x80;
+          for (let i = 0; i < AR_NUM_STEPS; i++) S.lastRaw[nb + 2 + i] = 0xFF;
+          S.lastRaw[nb + 2 + s] = fineVal;
+        }
+        // else: next slot occupied by another plock — can't create companion
+        return;
+      }
+    }
+
+    // Compute LFO effective speed label from current raw data
+    function lfoSpeedLabel(t, s, poolSound) {
+      const spdInfo = PLOCK_INFO[0x21];
+      const mulInfo = PLOCK_INFO[0x22];
+      const spdArr = S.plockValues && S.plockValues[t].get(0x21);
+      const mulArr = S.plockValues && S.plockValues[t].get(0x22);
+      const spdRaw = (spdArr && spdArr[s] !== 0xFF) ? spdArr[s]
+        : (poolSound && spdInfo.sndOff < poolSound.length ? poolSound[spdInfo.sndOff]
+        : getKitDefault(t, spdInfo.sndOff));
+      const mulRaw = (mulArr && mulArr[s] !== 0xFF) ? mulArr[s]
+        : (poolSound && mulInfo.sndOff < poolSound.length ? poolSound[mulInfo.sndOff]
+        : getKitDefault(t, mulInfo.sndOff));
+      if (spdRaw === null || mulRaw === null) return null;
+      const spd = spdRaw - 64;
+      const isDot = mulRaw >= 12;
+      const mulIdx = isDot ? mulRaw - 12 : mulRaw;
+      const mulFactor = Math.pow(2, mulIdx);
+      const rev = spd < 0 ? ' rev' : '';
+      if (spd === 0) return 'stopped';
+      if (isDot) {
+        const hz = 120 * Math.abs(spd) * mulFactor / (128 * 240);
+        return (hz >= 1 ? hz.toFixed(2) + ' Hz' : (1/hz).toFixed(2) + ' s') + rev;
+      }
+      const cpb = Math.abs(spd) * mulFactor / 128;
+      const spc = 16 / cpb;
+      const str = spc === 1 ? '1/16' : spc === 2 ? '1/8' : spc === 4 ? '1/4'
+        : spc === 8 ? '1/2' : spc === 16 ? '1 bar' : spc === 32 ? '2 bars'
+        : spc === 64 ? '4 bars' : spc >= 16 ? (spc/16).toFixed(1) + ' bars'
+        : spc < 1 ? '1/' + Math.round(4/spc) + ' beat'
+        : spc.toFixed(1) + ' steps';
+      return str + rev;
+    }
+
+    // FX LFO speed label (mirrors lfoSpeedLabel but reads from FX kit offsets)
+    function fxLfoSpeedLabel(t, s) {
+      const spdArr = S.plockValues && S.plockValues[t].get(29);
+      const mulArr = S.plockValues && S.plockValues[t].get(30);
+      const spdRaw = (spdArr && spdArr[s] !== 0xFF) ? spdArr[s]
+        : getKitFxDefault(FX_PLOCK_INFO[29].kitOff);
+      const mulRaw = (mulArr && mulArr[s] !== 0xFF) ? mulArr[s]
+        : getKitFxDefault(FX_PLOCK_INFO[30].kitOff);
+      if (spdRaw === null || mulRaw === null) return null;
+      const spd = spdRaw - 64;
+      const isDot = mulRaw >= 12;
+      const mulIdx = isDot ? mulRaw - 12 : mulRaw;
+      const mulFactor = Math.pow(2, mulIdx);
+      const rev = spd < 0 ? ' rev' : '';
+      if (spd === 0) return 'stopped';
+      if (isDot) {
+        const hz = 120 * Math.abs(spd) * mulFactor / (128 * 240);
+        return (hz >= 1 ? hz.toFixed(2) + ' Hz' : (1/hz).toFixed(2) + ' s') + rev;
+      }
+      const cpb = Math.abs(spd) * mulFactor / 128;
+      const spc = 16 / cpb;
+      const str = spc === 1 ? '1/16' : spc === 2 ? '1/8' : spc === 4 ? '1/4'
+        : spc === 8 ? '1/2' : spc === 16 ? '1 bar' : spc === 32 ? '2 bars'
+        : spc === 64 ? '4 bars' : spc >= 16 ? (spc/16).toFixed(1) + ' bars'
+        : spc < 1 ? '1/' + Math.round(4/spc) + ' beat'
+        : spc.toFixed(1) + ' steps';
+      return str + rev;
+    }
+
+    // DELAY / REVERB / DIST / COMP / FX_LFO sections (FX track only)
+    function buildFxParamSection(secKey, t, s) {
+      const body = document.createElement('div');
+      body.className = 'sp-params';
+
+      const order = FX_SECTION_ORDER[secKey]
+        || Object.keys(FX_PLOCK_INFO).map(Number).filter(k => FX_PLOCK_INFO[k].sec === secKey);
+
+      for (const pt of order) {
+        const info = FX_PLOCK_INFO[pt];
+        if (!info) continue;
+
+        const lbl = info.lbl;
+        const kitDef = getKitFxDefault(info.kitOff);
+        const plArr  = S.plockValues && S.plockValues[t].get(pt);
+        const plVal  = plArr ? plArr[s] : 0xFF;
+        const locked = plVal !== 0xFF;
+
+        const displayVal = locked ? plVal : (kitDef !== null ? kitDef : '?');
+        const plRawVal = locked ? plVal : 128;
+        const plInitVal = locked ? plVal : (kitDef !== null ? kitDef : 0);
+        const ptCapture = pt;
+
+        let displayFn, pMin = 0, pMax = 128, snap, snapR;
+
+        if (info.enum) {
+          const enumArr = info.enum;
+          const enumLen = enumArr.length;
+          displayFn = (v) => v >= enumLen ? 'TRK' : (enumArr[v] ?? String(v));
+          pMax = enumLen;
+        } else if (info.fxLfoDest) {
+          const destCount = FX_LFO_DEST_UI_IDS.length;
+          displayFn = (v) => {
+            if (v >= destCount) return 'TRK';
+            const internalId = FX_LFO_DEST_UI_IDS[v];
+            return fxLfoDestName(internalId);
+          };
+          pMax = destCount;
+        } else if (info.noteLen) {
+          displayFn = (v) => v >= 128 ? 'TRK' : noteLenDisplay(noteLenVal(v));
+        } else if (info.pct200) {
+          // 0-127 displayed as 0-198% (64 = 100%)
+          displayFn = (v) => v >= 128 ? 'TRK' : Math.round(v * 200 / 128);
+        } else if (info.inf127) {
+          displayFn = (v) => v >= 128 ? 'TRK' : v === 127 ? '\u221E' : String(v);
+        } else if (info.lfoPhase) {
+          displayFn = (v) => v >= 128 ? 'TRK' : Math.round(v * 360 / 128) + '\u00B0';
+        } else if (info.bipolar) {
+          displayFn = (v) => {
+            if (v >= 128) return 'TRK';
+            const sv = v - 64;
+            return (sv >= 0 ? '+' : '') + sv;
+          };
+          snap = 64; snapR = 3;
+        } else {
+          displayFn = (v) => v >= 128 ? 'TRK' : v;
+        }
+
+        // Convert raw internal IDs to UI indices for FX LFO dest slider
+        let sliderRawVal = plRawVal;
+        let sliderInitVal = plInitVal;
+        if (info.fxLfoDest) {
+          sliderRawVal  = plRawVal >= 128  ? pMax : (FX_LFO_DEST_ID_TO_UI.get(plRawVal) ?? 0);
+          sliderInitVal = plInitVal >= 128 ? 0    : (FX_LFO_DEST_ID_TO_UI.get(plInitVal) ?? 0);
+        }
+
+        let onChange;
+        if (info.fxLfoDest) {
+          onChange = (v) => {
+            writePlock(t, ptCapture, s, v >= pMax ? 0xFF : FX_LFO_DEST_UI_IDS[v]);
+            refreshAfterEdit();
+          };
+        } else {
+          onChange = (v) => {
+            writePlock(t, ptCapture, s, v >= pMax ? 0xFF : v);
+            refreshAfterEdit();
+          };
+        }
+
+        const opts = {
+          min: pMin, max: pMax, rawVal: sliderRawVal, initVal: sliderInitVal,
+          displayFn, onChange,
+        };
+        if (snap !== undefined) { opts.snap = snap; opts.snapR = snapR; }
+
+        // FX LFO SPD/MUL: live-preview speed label while dragging
+        if (secKey === 'FX_LFO' && (pt === 29 || pt === 30)) {
+          opts.onPreview = (v) => {
+            const sub = body.closest?.('.sp-sec')?.querySelector('.sp-sec-sub');
+            if (!sub) return;
+            const spdArr = S.plockValues && S.plockValues[t].get(29);
+            const mulArr = S.plockValues && S.plockValues[t].get(30);
+            let spdRaw = (spdArr && spdArr[s] !== 0xFF) ? spdArr[s]
+              : getKitFxDefault(FX_PLOCK_INFO[29].kitOff);
+            let mulRaw = (mulArr && mulArr[s] !== 0xFF) ? mulArr[s]
+              : getKitFxDefault(FX_PLOCK_INFO[30].kitOff);
+            if (pt === 29) spdRaw = (v >= pMax) ? getKitFxDefault(FX_PLOCK_INFO[29].kitOff) : v;
+            if (pt === 30) mulRaw = (v >= pMax) ? getKitFxDefault(FX_PLOCK_INFO[30].kitOff) : v;
+            if (spdRaw == null || mulRaw == null) return;
+            const spd = spdRaw - 64;
+            const isDot = mulRaw >= 12;
+            const mulIdx = isDot ? mulRaw - 12 : mulRaw;
+            const mulFactor = Math.pow(2, mulIdx);
+            const rev = spd < 0 ? ' rev' : '';
+            let label;
+            if (spd === 0) { label = 'stopped'; }
+            else if (isDot) {
+              const hz = 120 * Math.abs(spd) * mulFactor / (128 * 240);
+              label = (hz >= 1 ? hz.toFixed(2) + ' Hz' : (1/hz).toFixed(2) + ' s') + rev;
+            } else {
+              const spc = 16 * 128 / (Math.abs(spd) * mulFactor);
+              label = spc === 1 ? '1/16' : spc === 2 ? '1/8' : spc === 4 ? '1/4'
+                : spc === 8 ? '1/2' : spc === 16 ? '1 bar' : spc === 32 ? '2 bars'
+                : spc === 64 ? '4 bars' : spc >= 16 ? (spc/16).toFixed(1) + ' bars'
+                : spc < 1 ? '1/' + Math.round(4/spc) + ' beat'
+                : spc.toFixed(1) + ' steps';
+              label += rev;
+            }
+            sub.textContent = '(' + label + ')';
+          };
+        }
+
+        const showInput = typeof displayVal === 'number'
+          ? (info.fxLfoDest ? (FX_LFO_DEST_ID_TO_UI.get(displayVal) ?? 0) : displayVal)
+          : displayVal;
+        const showVal = typeof showInput === 'number' ? displayFn(showInput) : showInput;
+
+        body.appendChild(makeParamRow(lbl, showVal, locked, opts));
+      }
+
+      // FX LFO: compute effective speed string for section header
+      let lfoSpeedStr = null;
+      if (secKey === 'FX_LFO') {
+        lfoSpeedStr = fxLfoSpeedLabel(t, s);
+      }
+
+      return makeSec(secKey === 'FX_LFO' ? 'LFO' : secKey, body, lfoSpeedStr);
+    }
+
+    // SRC / SMPL / FLTR / AMP / LFO sections
+    function buildParamSection(secKey, t, s, machineType, poolSound) {
+      const body = document.createElement('div');
+      body.className = 'sp-params';
+
+      // Use AR display order if defined, otherwise default numeric key order
+      const order = SECTION_ORDER[secKey]
+        || Object.keys(PLOCK_INFO).map(Number).filter(k => PLOCK_INFO[k].sec === secKey);
+
+      for (const pt of order) {
+        const info = PLOCK_INFO[pt];
+        if (!info) continue;
+
+        // Override SRC labels with machine-specific names; skip unused params
+        let lbl = info.lbl;
+        if (secKey === 'SRC' && machineType !== null && machineType !== undefined
+            && pt <= 0x07) {
+          const ml = MACHINE_PARAM_NAMES[pt][machineType];
+          if (ml === '-') continue;  // param not used by this machine
+          if (ml) lbl = ml;
+        }
+
+        // Use pool sound defaults if available, otherwise kit defaults
+        const kitDef = poolSound && info.sndOff < poolSound.length
+          ? poolSound[info.sndOff]
+          : getKitDefault(t, info.sndOff);
+        const plArr  = S.plockValues && S.plockValues[t].get(pt);
+        const plVal  = plArr ? plArr[s] : 0xFF;
+        const locked = plVal !== 0xFF;
+
+        const displayVal = locked ? plVal : (kitDef !== null ? kitDef : '?');
+        // Editable: 0-127 = plock value, 128 = clear (use default)
+        const plRawVal = locked ? plVal : 128;
+        const plInitVal = locked ? plVal : (kitDef !== null ? kitDef : 0);
+        const ptCapture = pt;  // capture for closure
+
+        // Determine display function and slider opts from metadata
+        let enumArr = info.enum;
+        let isBipolar = info.bipolar;
+
+        // For SRC params, check machine-specific overrides
+        let decimalHR = null;  // halfRange for decimal (coarse+fine) params
+        let machInf127 = false;
+        let isFreqParam = false;  // coarse*128+fine = Hz (HH Lab)
+        if (secKey === 'SRC' && pt <= 0x07 && machineType !== null && machineType !== undefined) {
+          if (MACHINE_ENUMS[machineType]?.[pt]) enumArr = MACHINE_ENUMS[machineType][pt];
+          if (MACHINE_BIPOLAR[machineType]?.has(pt)) isBipolar = true;
+          // Decimal coarse+fine params
+          const decCfg = MACHINE_DECIMAL[machineType];
+          if (decCfg && decCfg[pt] !== undefined) {
+            decimalHR = decCfg[pt];
+            isBipolar = true;  // decimal params are always bipolar
+          }
+          // Frequency params (coarse*128 + fine)
+          if (MACHINE_FREQ[machineType]?.has(pt)) isFreqParam = true;
+          // TUN is always bipolar even if not decimal
+          if (lbl === 'TUN') isBipolar = true;
+          // Machine-specific inf127
+          if (MACHINE_INF127[machineType]?.has(pt)) machInf127 = true;
+        }
+
+        let displayFn, pMin = 0, pMax = 128, snap, snapR;
+        if (enumArr) {
+          const enumLen = enumArr.length;
+          displayFn = (v) => v >= enumLen ? 'TRK' : (enumArr[v] ?? String(v));
+          pMax = enumLen;  // 0..(len-1) for values, len=TRK
+        } else if (machInf127) {
+          // Machine-specific inf127 (SY Dual VCO DEC1/DEC2, SY Chip DCY, SY Raw DCY)
+          displayFn = (v) => v >= 128 ? 'TRK' : v === 127 ? '\u221E' : String(v);
+        } else if (isFreqParam) {
+          // Frequency param: slider 0-16256 Hz (coarse*128+fine), +1 for TRK
+          pMin = 0; pMax = 16257;
+          displayFn = (v) => v >= 16256 ? 'TRK' : v + 'Hz';
+        } else if (isBipolar) {
+          if (decimalHR !== null) {
+            // Decimal coarse+fine param: half-step slider (0.50 resolution)
+            const hr = decimalHR;
+            const sliderHalf = hr * 2;  // number of slider positions each side of center
+            pMin = 0; pMax = sliderHalf * 2 + 1;  // +1 for TRK
+            displayFn = (v) => {
+              if (v >= sliderHalf * 2) return 'TRK';
+              const d = (v - sliderHalf) * 0.50;
+              return (d >= 0 ? '+' : '') + d.toFixed(2);
+            };
+            snap = sliderHalf; snapR = 3;
+          } else {
+            displayFn = (v) => {
+              if (v >= 128) return 'TRK';
+              const sv = v - 64;
+              return (sv >= 0 ? '+' : '') + sv;
+            };
+            snap = 64; snapR = 3;
+          }
+        } else if (info.pan) {
+          displayFn = (v) => {
+            if (v >= 128) return 'TRK';
+            if (v === 64) return 'C';
+            return v < 64 ? 'L' + (64 - v) : 'R' + (v - 64);
+          };
+          snap = 64; snapR = 3;
+        } else if (info.inf127) {
+          displayFn = (v) => v >= 128 ? 'TRK' : v === 127 ? '\u221E' : String(v);
+        } else if (info.lfoDest) {
+          const destCount = LFO_DEST_UI_IDS.length;  // 33
+          displayFn = (v) => {
+            if (v >= destCount) return 'TRK';
+            const internalId = LFO_DEST_UI_IDS[v];
+            return lfoDestName(internalId, machineType);
+          };
+          pMax = destCount;
+        } else if (info.lfoPhase) {
+          displayFn = (v) => v >= 128 ? 'TRK' : Math.round(v * 360 / 128) + '\u00B0';
+        } else {
+          displayFn = (v) => v >= 128 ? 'TRK' : v;
+        }
+
+        // For lfoDest, convert raw internal IDs to UI indices for the slider
+        let sliderRawVal = plRawVal;
+        let sliderInitVal = plInitVal;
+        if (info.lfoDest) {
+          sliderRawVal  = plRawVal >= 128  ? pMax : (LFO_DEST_ID_TO_UI.get(plRawVal) ?? 0);
+          sliderInitVal = plInitVal >= 128 ? 0    : (LFO_DEST_ID_TO_UI.get(plInitVal) ?? 0);
+        }
+
+        // For freq params, convert coarse*128+fine to Hz slider value
+        if (isFreqParam) {
+          const fineArr = S.plockFineValues && S.plockFineValues[t].get(pt);
+          const fineVal = (fineArr && locked) ? fineArr[s] : 0xFF;
+          const fine = (fineVal !== 0xFF) ? fineVal : 0;
+          if (locked) {
+            sliderRawVal = plVal * 128 + fine;
+          } else {
+            sliderRawVal = pMax;  // TRK
+          }
+          const defFine = poolSound && info.sndOff + 1 < poolSound.length
+            ? poolSound[info.sndOff + 1]
+            : (getKitDefault(t, info.sndOff + 1) ?? 0);
+          sliderInitVal = locked ? sliderRawVal : (plInitVal * 128 + (defFine >> 1));
+        }
+
+        // For decimal params, convert coarse+fine to half-step slider value
+        if (decimalHR !== null) {
+          const hr = decimalHR;
+          const sliderCenter = hr * 2;  // slider midpoint
+          const fineArr = S.plockFineValues && S.plockFineValues[t].get(pt);
+          const fineVal = (fineArr && locked) ? fineArr[s] : 0xFF;
+          const fine = (fineVal !== 0xFF) ? fineVal : 0;
+          if (locked) {
+            // Convert coarse+fine → half-step: round((coarse-64 + fine/128) / 0.50) + sliderCenter
+            sliderRawVal = Math.round(((plVal - 64) + fine / 128) / 0.50) + sliderCenter;
+          } else {
+            sliderRawVal = pMax;  // TRK
+          }
+          // Kit default: coarse + fine from adjacent bytes in sound pool
+          const coarseMin = 64 - hr;
+          const kitCoarse = (plInitVal >= coarseMin && plInitVal <= 64 + hr) ? plInitVal : 64;
+          const kitFine = poolSound && info.sndOff + 1 < poolSound.length
+            ? poolSound[info.sndOff + 1]
+            : (getKitDefault(t, info.sndOff + 1) ?? 0);
+          const kitDecimal = (kitCoarse - 64) + kitFine / 256;  // s_u16_t low byte: 0-255
+          const kitSlider  = Math.round(kitDecimal / 0.50) + hr * 2;
+          sliderInitVal = locked ? sliderRawVal : kitSlider;
+        }
+
+        let onChange;
+        if (info.lfoDest) {
+          onChange = (v) => {
+            writePlock(t, ptCapture, s, v >= pMax ? 0xFF : LFO_DEST_UI_IDS[v]);
+            refreshAfterEdit();
+          };
+        } else if (isFreqParam) {
+          onChange = (v) => {
+            if (v >= 16256) {
+              clearPlockFine(t, ptCapture, s);
+              writePlock(t, ptCapture, s, 0xFF);
+            } else {
+              const coarse = Math.min(127, Math.floor(v / 128));
+              const fine   = Math.min(127, v - coarse * 128);
+              writePlock(t, ptCapture, s, coarse);
+              if (fine > 0) {
+                writePlockFine(t, ptCapture, s, fine);
+              } else {
+                clearPlockFine(t, ptCapture, s);
+              }
+            }
+            refreshAfterEdit();
+          };
+        } else if (decimalHR !== null) {
+          const hr = decimalHR;
+          const sliderCenter = hr * 2;
+          const coarseMin = 64 - hr;
+          const coarseMax = 64 + hr;
+          onChange = (v) => {
+            if (v >= sliderCenter * 2) {
+              // TRK: clear both coarse and fine
+              clearPlockFine(t, ptCapture, s);
+              writePlock(t, ptCapture, s, 0xFF);
+            } else {
+              // v is in half-step domain (may be float from number input).
+              // Convert to coarse + fine (0-127).
+              const halfV  = v / 2;
+              const coarse = Math.min(coarseMax, coarseMin + Math.floor(halfV));
+              const fine   = Math.min(127, Math.round((halfV - Math.floor(halfV)) * 128));
+              writePlock(t, ptCapture, s, coarse);
+              if (fine > 0) {
+                writePlockFine(t, ptCapture, s, fine);
+              } else {
+                clearPlockFine(t, ptCapture, s);
+              }
+            }
+            refreshAfterEdit();
+          };
+        } else {
+          onChange = (v) => {
+            writePlock(t, ptCapture, s, v >= pMax ? 0xFF : v);
+            refreshAfterEdit();
+          };
+        }
+
+        const opts = {
+          min: pMin, max: pMax, rawVal: sliderRawVal, initVal: sliderInitVal,
+          displayFn, onChange,
+        };
+        if (snap !== undefined) { opts.snap = snap; opts.snapR = snapR; }
+
+        // LFO SPD/MUL: live-preview speed label while dragging
+        if (secKey === 'LFO' && (pt === 0x21 || pt === 0x22)) {
+          const poolSnd = poolSound;
+          opts.onPreview = (v) => {
+            const sub = body.closest?.('.sp-sec')?.querySelector('.sp-sec-sub');
+            if (!sub) return;
+            // Temporarily write the preview value, compute label, then restore
+            const spdOff = PLOCK_INFO[0x21].sndOff;
+            const mulOff = PLOCK_INFO[0x22].sndOff;
+            const getSrc = (off) => poolSnd && off < poolSnd.length
+              ? poolSnd[off] : getKitDefault(t, off);
+            const spdArr = S.plockValues && S.plockValues[t].get(0x21);
+            const mulArr = S.plockValues && S.plockValues[t].get(0x22);
+            let spdRaw = (spdArr && spdArr[s] !== 0xFF) ? spdArr[s] : getSrc(spdOff);
+            let mulRaw = (mulArr && mulArr[s] !== 0xFF) ? mulArr[s] : getSrc(mulOff);
+            // Override the param being dragged with the preview value
+            if (pt === 0x21) spdRaw = (v >= pMax) ? getSrc(spdOff) : v;
+            if (pt === 0x22) mulRaw = (v >= pMax) ? getSrc(mulOff) : v;
+            if (spdRaw == null || mulRaw == null) return;
+            const spd = spdRaw - 64;
+            const isDot = mulRaw >= 12;
+            const mulIdx = isDot ? mulRaw - 12 : mulRaw;
+            const mulFactor = Math.pow(2, mulIdx);
+            const rev = spd < 0 ? ' rev' : '';
+            let label;
+            if (spd === 0) { label = 'stopped'; }
+            else if (isDot) {
+              const hz = 120 * Math.abs(spd) * mulFactor / (128 * 240);
+              label = (hz >= 1 ? hz.toFixed(2) + ' Hz' : (1/hz).toFixed(2) + ' s') + rev;
+            } else {
+              const spc = 16 * 128 / (Math.abs(spd) * mulFactor);
+              label = spc === 1 ? '1/16' : spc === 2 ? '1/8' : spc === 4 ? '1/4'
+                : spc === 8 ? '1/2' : spc === 16 ? '1 bar' : spc === 32 ? '2 bars'
+                : spc === 64 ? '4 bars' : spc >= 16 ? (spc/16).toFixed(1) + ' bars'
+                : spc < 1 ? '1/' + Math.round(4/spc) + ' beat'
+                : spc.toFixed(1) + ' steps';
+              label += rev;
+            }
+            sub.textContent = '(' + label + ')';
+          };
+        }
+
+        // For freq params: number input shows/accepts Hz integers
+        if (isFreqParam) {
+          opts.numDisplay = (v) => v >= 16256 ? '' : String(v);
+          opts.numParse = (str) => {
+            const f = parseInt(str, 10);
+            if (isNaN(f)) return null;
+            return Math.max(0, Math.min(16256, f));
+          };
+          opts.numStep = '1';
+          opts.numMin = 0;
+          opts.numMax = 16256;
+        }
+
+        // For decimal params: number input shows/accepts display-unit decimals
+        if (decimalHR !== null) {
+          const hr = decimalHR;
+          const sliderCenter = hr * 2;
+          opts.numDisplay = (v) => v >= sliderCenter * 2 ? '' : ((v - sliderCenter) * 0.50).toFixed(2);
+          opts.numParse = (str) => {
+            const f = parseFloat(str);
+            if (isNaN(f)) return null;
+            return Math.max(-hr, Math.min(hr, f)) / 0.50 + sliderCenter;
+          };
+          opts.numStep = '0.01';
+          opts.numMin = -hr;
+          opts.numMax = hr;
+        }
+
+        const showInput = typeof displayVal === 'number'
+          ? (info.lfoDest ? (LFO_DEST_ID_TO_UI.get(displayVal) ?? 0) : displayVal)
+          : displayVal;
+        let showVal;
+
+        // For freq params: compute showVal from actual coarse+fine data
+        if (isFreqParam) {
+          if (locked) {
+            const fineArr = S.plockFineValues && S.plockFineValues[t].get(pt);
+            const fineVal = fineArr ? fineArr[s] : 0xFF;
+            const fine = (fineVal !== 0xFF) ? fineVal : 0;
+            showVal = (plVal * 128 + fine) + 'Hz';
+          } else if (kitDef !== null) {
+            const defFine = poolSound && info.sndOff + 1 < poolSound.length
+              ? poolSound[info.sndOff + 1]
+              : (getKitDefault(t, info.sndOff + 1) ?? 0);
+            showVal = (kitDef * 128 + (defFine >> 1)) + 'Hz';  // s_u16_t: hi=byte[0], lo<<1=byte[1]
+          } else {
+            showVal = '?';
+          }
+        // For decimal params: compute showVal from actual coarse+fine data
+        } else if (decimalHR !== null) {
+          const coarseMin = 64 - decimalHR;
+          if (locked) {
+            const fineArr = S.plockFineValues && S.plockFineValues[t].get(pt);
+            const fineVal = fineArr ? fineArr[s] : 0xFF;
+            const fine = (fineVal !== 0xFF) ? fineVal : 0;
+            const d = (plVal - 64) + fine / 128;
+            showVal = (d >= 0 ? '+' : '') + d.toFixed(2);
+          } else if (kitDef !== null) {
+            const defFineD = poolSound && info.sndOff + 1 < poolSound.length
+              ? poolSound[info.sndOff + 1]
+              : (getKitDefault(t, info.sndOff + 1) ?? 0);
+            const dKit = (kitDef - 64) + defFineD / 256;  // s_u16_t low byte: 0-255
+            showVal = (dKit >= 0 ? '+' : '') + dKit.toFixed(2);
+          } else {
+            showVal = '?';
+          }
+        } else {
+          showVal = typeof showInput === 'number' ? displayFn(showInput) : showInput;
+        }
+
+        body.appendChild(makeParamRow(lbl, showVal, locked, opts));
+      }
+
+      // LFO: compute effective speed string for section header
+      let lfoSpeedStr = null;
+      if (secKey === 'LFO') {
+        lfoSpeedStr = lfoSpeedLabel(t, s, poolSound);
+      }
+
+      return makeSec(secKey, body, lfoSpeedStr);
+    }
+
+    // ─── Panel helpers ────────────────────────────────────────────────────────
+
+    function makeSec(title, bodyEl, subtitle) {
+      const sec = document.createElement('div');
+      sec.className = 'sp-sec';
+      const head = document.createElement('div');
+      head.className = 'sp-sec-head';
+      head.textContent = title;
+      if (subtitle !== undefined && subtitle !== null) {
+        const sub = document.createElement('span');
+        sub.className = 'sp-sec-sub';
+        sub.style.cssText = 'margin-left:6px;';
+        sub.textContent = '(' + subtitle + ')';
+        head.appendChild(sub);
+      }
+      sec.appendChild(head);
+      sec.appendChild(bodyEl);
+      return sec;
+    }
+
+    function makeParamRow(lbl, val, locked, opts) {
+      const row = document.createElement('div');
+      row.className = 'sp-param';
+      const l = document.createElement('span');
+      l.className = 'sp-lbl';
+      l.textContent = lbl;
+      const v = document.createElement('span');
+      v.className = 'sp-val' + (locked ? ' locked' : '')
+                  + (opts ? ' editable' : '');
+      v.textContent = val;
+      row.appendChild(l);
+      row.appendChild(v);
+
+      if (opts) {
+        const { min, max, rawVal, onChange, displayFn, initVal, snap } = opts;
+        const startVal = initVal !== undefined ? initVal : rawVal;
+        const hasSnap  = snap !== undefined;
+        const snapR    = opts.snapR !== undefined ? opts.snapR : 2;  // snap dead-band radius
+
+        // Snap mapping: slider range is extended by 2×snapR so all values
+        // remain reachable. Positions within ±snapR of the snap point map
+        // to the snap value; positions outside are shifted to fill the gap.
+        const valToSlider = (val) => {
+          if (!hasSnap) return val;
+          if (val === snap) return snap;
+          return val > snap ? val + snapR : val - snapR;
+        };
+        const sliderToVal = (sv) => {
+          if (!hasSnap) return sv;
+          if (Math.abs(sv - snap) <= snapR) return snap;
+          return sv > snap ? sv - snapR : sv + snapR;
+        };
+
+        // ── Click: expand to slider + number input ──
+        v.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (v.querySelector('.sp-editor')) return;
+
+          const editor = document.createElement('div');
+          editor.className = 'sp-editor';
+
+          const sMin = hasSnap ? min - snapR : min;
+          const sMax = hasSnap ? max + snapR : max;
+
+          const slider = document.createElement('input');
+          slider.type = 'range';
+          slider.min  = sMin;
+          slider.max  = sMax;
+          slider.value = valToSlider(startVal);
+
+          const hasCustomNum = opts.numDisplay && opts.numParse;
+          const numInp = document.createElement('input');
+          numInp.type  = 'number';
+          numInp.min   = hasCustomNum ? (opts.numMin ?? min) : min;
+          numInp.max   = hasCustomNum ? (opts.numMax ?? max) : max;
+          if (hasCustomNum && opts.numStep) numInp.step = opts.numStep;
+          numInp.value = hasCustomNum ? opts.numDisplay(startVal) : startVal;
+
+          const disp = document.createElement('span');
+          disp.className = 'sp-disp';
+          if (displayFn) disp.textContent = displayFn(startVal);
+
+          editor.appendChild(slider);
+          editor.appendChild(numInp);
+          if (displayFn) editor.appendChild(disp);
+
+          v.textContent = '';
+          v.appendChild(editor);
+          numInp.focus();
+          numInp.select();
+
+          let curVal = rawVal;
+          const updateDisp = (nv) => {
+            curVal = nv;
+            if (displayFn) disp.textContent = displayFn(nv);
+          };
+
+          // Guard: prevent slider→numInp feedback when numInp sets slider.value
+          let numDriving = false;
+
+          // Slider drag → update number + display in real-time
+          slider.addEventListener('input', () => {
+            if (numDriving) return;            // ignore echo from numInp handler
+            const val = sliderToVal(parseInt(slider.value, 10));
+            numInp.value = hasCustomNum ? opts.numDisplay(val) : val;
+            updateDisp(val);
+            if (opts.onPreview) opts.onPreview(val);
+          });
+
+          // Number input → update slider + display
+          numInp.addEventListener('input', () => {
+            const nv = hasCustomNum ? opts.numParse(numInp.value) : parseInt(numInp.value, 10);
+            if (nv !== null && !isNaN(nv)) {
+              const clamped = Math.max(min, Math.min(max, nv));
+              numDriving = true;
+              slider.value = valToSlider(clamped);
+              numDriving = false;
+              updateDisp(clamped);
+              if (opts.onPreview) opts.onPreview(clamped);
+            }
+          });
+
+          let done = false;
+          const restore = () => { v.textContent = val; };
+          const commit = () => {
+            if (done) return;
+            done = true;
+            if (curVal !== rawVal) { onChange(curVal); return; }
+            restore();
+          };
+          const cancel = () => {
+            if (done) return;
+            done = true;
+            restore();
+          };
+
+          // Slider release → sync number input display and commit
+          slider.addEventListener('pointerup', () => {
+            numInp.value = hasCustomNum ? opts.numDisplay(curVal) : curVal;
+            commit();
+          });
+
+          numInp.addEventListener('keydown', (ke) => {
+            if (ke.key === 'Enter')  { ke.preventDefault(); commit(); }
+            if (ke.key === 'Escape') { ke.preventDefault(); cancel(); }
+            ke.stopPropagation();
+          });
+
+          // Focus leaves editor entirely → commit
+          editor.addEventListener('focusout', () => {
+            setTimeout(() => {
+              if (!done && !editor.contains(document.activeElement)) commit();
+            }, 0);
+          });
+        });
+      }
+
+      return row;
+    }
+
+    // ─── Kit default lookup ───────────────────────────────────────────────────
+    // Returns the default value byte for a plock-able parameter from the decoded
+    // kit. soundOff is the offset within ar_sound_t; for s_u16_t fields the hi
+    // byte (first in memory, lower address) carries the 0-127 value.
+
+    function getKitDefault(trackIdx, soundOff) {
+      if (!S.lastKit || trackIdx >= 12) return null;  // FX track has no ar_sound_t
+      const base = KIT_TRACKS_BASE + trackIdx * AR_SOUND_V5_SZ;
+      if (base + soundOff >= S.lastKit.length) return null;
+      return S.lastKit[base + soundOff];
+    }
+
+    function getKitFxDefault(kitOff) {
+      if (!S.lastKit || kitOff >= S.lastKit.length) return null;
+      return S.lastKit[kitOff];
+    }
+
+    function getTrackMachineType(trackIdx) {
+      if (!S.lastKit || trackIdx >= 12) return null;
+      const off = KIT_TRACKS_BASE + trackIdx * AR_SOUND_V5_SZ + MACHINE_TYPE_OFFSET;
+      if (off >= S.lastKit.length) return null;
+      const mt = S.lastKit[off];
+      return (mt < MACHINE_NAMES.length) ? mt : null;
+    }
+
+
+
+    // ─── Display helpers ──────────────────────────────────────────────────────
+
+    // MIDI note → name using AR convention: note 60 = C3 (C0 = note 24)
+    function midiNoteToName(n) {
+      if (n > 127) return '?';
+      const NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+      return NAMES[n % 12] + (Math.floor(n / 12) - 2);
+    }
+
+    // Note/retrig length → display value (in 1/16-note steps)
+    // Encoding: 9 ranges, each 16 values (except first = 14), step doubles per range.
+    const NOTE_LEN_RANGES = [
+      { start:   0, count: 14, base: 0.125,  step: 0.0625 },
+      { start:  14, count: 16, base: 1,      step: 0.0625 },
+      { start:  30, count: 16, base: 2,      step: 0.125  },
+      { start:  46, count: 16, base: 4,      step: 0.25   },
+      { start:  62, count: 16, base: 8,      step: 0.5    },
+      { start:  78, count: 16, base: 16,     step: 1      },
+      { start:  94, count: 16, base: 32,     step: 2      },
+      { start: 110, count: 16, base: 64,     step: 4      },
+    ];
+    // Map of step-count → note label
+    const NOTE_LEN_LABELS = {
+      0.125: '1/128', 0.25: '1/64', 0.5: '1/32', 1: '1/16', 2: '1/8',
+      4: '1/4', 8: '1/2', 16: '1/1', 32: '2/1', 64: '4/1', 128: '8/1',
+    };
+    function noteLenVal(v) {
+      if (v >= 126) return v === 126 ? 128 : Infinity;
+      for (let i = NOTE_LEN_RANGES.length - 1; i >= 0; i--) {
+        const r = NOTE_LEN_RANGES[i];
+        if (v >= r.start) return r.base + (v - r.start) * r.step;
+      }
+      return 0;
+    }
+    function noteLenDisplay(steps) {
+      if (!isFinite(steps)) return '\u221E';
+      const lbl = NOTE_LEN_LABELS[steps];
+      if (lbl) return lbl;
+      // Show decimal, trim trailing zeros
+      const s = steps % 1 === 0 ? String(steps) : steps.toFixed(4).replace(/0+$/, '');
+      return s;
+    }
+    function noteLenStr(v) {
+      if (v === 0xFF) return 'DEF';
+      return noteLenDisplay(noteLenVal(v));
+    }
+
+    // Micro-timing → musical fraction string
+    // Each step = 1/16 note = 24 micro-timing units → 1 unit = 1/384 whole note
+    function utimeFrac(n) {
+      if (n === 0) return '0';
+      const sign = n > 0 ? '+' : '-';
+      const a = Math.abs(n);
+      const g = gcd(a, 384);
+      return sign + (a / g) + '/' + (384 / g);
+    }
+    function gcd(a, b) { while (b) { [a, b] = [b, a % b]; } return a; }
+
