@@ -24,6 +24,7 @@ RETRIG_RATE_OFF    = 0x01B0  # retrig_rates[64] within track
 DEFAULT_NOTE_OFF   = 0x0230  # default_note within track
 DEFAULT_VELO_OFF   = 0x0231  # default_velocity within track
 DEFAULT_LEN_OFF    = 0x0232  # default_note_len within track
+DEFAULT_TRIG_FLAGS_OFF = 0x0233  # default_trig_flags (s_u16_t, hi byte first)
 NUM_STEPS_OFF      = 0x0235  # num_steps within track
 SOUND_LOCK_OFF     = 0x0237  # sound_locks[64] within track
 SPEED_OFF          = 0x0277  # flags_and_speed within track
@@ -35,9 +36,13 @@ PLOCK_SEQ_SZ       = 0x42    # 66 bytes: type(1) + track(1) + values(64)
 NUM_PLOCK_SEQS     = 72
 
 # BPM
+MASTER_CHG_OFF     = 0x3323  # u16 LE, master change length
+KIT_NUMBER_OFF     = 0x3325
+SWING_AMOUNT_OFF   = 0x3326
+SCALE_MODE_OFF     = 0x3327  # 0=normal, 1=advanced
+MASTER_SPEED_OFF   = 0x3328  # 0=2x,1=3/2x,2=1x,3=3/4x,4=1/2x,5=1/4x,6=1/8x
 BPM_MSB_OFF        = 0x332A
 BPM_LSB_OFF        = 0x332B
-KIT_NUMBER_OFF     = 0x3325
 
 # Plock types (matching PLOCK_INFO in viewer)
 PL_SRC_P1   = 0x00  # SRC param 1 (LEV for most machines)
@@ -69,14 +74,59 @@ PL_LFO_SPH  = 0x26  # LFO start phase (0-127)
 PL_LFO_MOD  = 0x27  # LFO trig mode (0-4)
 PL_LFO_DEP  = 0x28  # LFO depth
 
+# FX plock types (FX track only — same numbers, different meaning)
+FX_PL_DELAY_TIME   = 0   # Delay time
+FX_PL_DELAY_PP     = 1   # Delay ping-pong (0=off, 1=on)
+FX_PL_DELAY_WID    = 2   # Delay width (bipolar: 64=center)
+FX_PL_DELAY_FB     = 3   # Delay feedback
+FX_PL_DELAY_HPF    = 4   # Delay HPF
+FX_PL_DELAY_LPF    = 5   # Delay LPF
+FX_PL_DELAY_REV    = 6   # Delay reverb send
+FX_PL_DELAY_VOL    = 7   # Delay volume
+FX_PL_DIST_DOV     = 8   # Distortion delay overdrive
+FX_PL_DIST_DEL     = 9   # Distortion delay routing (0=pre, 1=post)
+FX_PL_REVERB_PRE   = 10  # Reverb pre-delay
+FX_PL_REVERB_DEC   = 11  # Reverb decay
+FX_PL_REVERB_FRQ   = 12  # Reverb freq
+FX_PL_REVERB_GAI   = 13  # Reverb gain (bipolar: 64=center)
+FX_PL_REVERB_HPF   = 14  # Reverb HPF
+FX_PL_REVERB_LPF   = 15  # Reverb LPF
+FX_PL_REVERB_VOL   = 16  # Reverb volume
+FX_PL_DIST_REV     = 17  # Distortion reverb routing (0=pre, 1=post)
+FX_PL_DIST_AMT     = 18  # Distortion amount
+FX_PL_DIST_SYM     = 19  # Distortion symmetry (bipolar: 64=center)
+FX_PL_COMP_THR     = 21  # Compressor threshold
+FX_PL_COMP_ATK     = 22  # Compressor attack
+FX_PL_COMP_REL     = 23  # Compressor release
+FX_PL_COMP_RAT     = 24  # Compressor ratio
+FX_PL_COMP_SEQ     = 25  # Compressor sidechain EQ (0=off, 1=lpf, 2=hpf, 3=hit)
+FX_PL_COMP_GAI     = 26  # Compressor makeup gain
+FX_PL_COMP_MIX     = 27  # Compressor dry/wet mix
+FX_PL_COMP_VOL     = 28  # Compressor volume
+FX_PL_LFO_SPD      = 29  # FX LFO speed (bipolar: 64=center)
+FX_PL_LFO_MUL      = 30  # FX LFO multiply
+FX_PL_LFO_FAD      = 31  # FX LFO fade (bipolar: 64=center)
+FX_PL_LFO_DST      = 32  # FX LFO destination
+FX_PL_LFO_WAV      = 33  # FX LFO waveform
+FX_PL_LFO_SPH      = 34  # FX LFO start phase
+FX_PL_LFO_MOD      = 35  # FX LFO trig mode
+FX_PL_LFO_DEP      = 36  # FX LFO depth (bipolar: 64=center)
+
+# FX kit parameter offsets (absolute within kit)
+FX_KIT_BASE        = 0x07CA
+
 # Trig bits: 14 bits per step, packed in 112 bytes (64 steps × 14 bits = 896 bits = 112 bytes)
 TRIG_ENABLE        = 0x0001
 TRIG_SYN_PL_SW     = 0x0080
 TRIG_SMP_PL_SW     = 0x0100
 TRIG_ENV_PL_SW     = 0x0200
 TRIG_LFO_PL_SW     = 0x0400
+TRIG_SYN_PL_EN     = 0x0800
+TRIG_SMP_PL_EN     = 0x1000
 # Normal trig: enable + all retrigger switches on
 TRIG_NORMAL        = TRIG_ENABLE | TRIG_SYN_PL_SW | TRIG_SMP_PL_SW | TRIG_ENV_PL_SW | TRIG_LFO_PL_SW
+# Lock trig: enable + PL_EN set + PL_SW off (SYN/SMP switches off)
+TRIG_LOCK          = TRIG_ENABLE | TRIG_SYN_PL_EN | TRIG_SMP_PL_EN | TRIG_ENV_PL_SW | TRIG_LFO_PL_SW
 
 # Machine IDs
 MACHINES = {
@@ -214,6 +264,12 @@ def make_pattern():
     # Kit number (0 = kit 1)
     raw[KIT_NUMBER_OFF] = 0x00
 
+    # Scale settings (u16 fields are big-endian)
+    raw[MASTER_CHG_OFF] = 0        # master change length = 1 (BE hi)
+    raw[MASTER_CHG_OFF + 1] = 1    # (BE lo)
+    raw[SCALE_MODE_OFF] = 0        # normal mode
+    raw[MASTER_SPEED_OFF] = 2      # 1x speed
+
     # Track configs: (machine, steps, speed, trig_steps, sound_locks)
     track_configs = [
         ('BD_HARD',     16, 2, [0, 4, 8, 12], {8: 5}),         # BD: 4-on-floor, step 9 → SY DUAL VCO
@@ -228,7 +284,7 @@ def make_pattern():
         ('OH_METALLIC', 16, 2, [2, 6, 10, 14], {6: 10}),        # OH: offbeat, step 7 → HH LAB
         ('CY_RIDE',     16, 2, [0, 8], {}),                     # CY: every bar
         ('CB_CLASSIC',  16, 2, [4, 12], {}),                    # CB: offbeat
-        ('BD_HARD',     16, 2, [], {}),                          # FX: off
+        ('BD_HARD',     16, 2, [0, 4, 8, 12], {}),               # FX: trigs on beats
     ]
 
     for t, (mach, steps, speed, trigs, slocks) in enumerate(track_configs):
@@ -261,8 +317,19 @@ def make_pattern():
         raw[base + DEFAULT_VELO_OFF] = 100
         raw[base + DEFAULT_LEN_OFF]  = 0x40
         raw[base + TRIG_PROB_OFF]    = 100
+        # Default trig flags (s_u16_t big-endian): TRIG_NORMAL matches AR defaults
+        dtf = TRIG_NORMAL
+        raw[base + DEFAULT_TRIG_FLAGS_OFF]     = (dtf >> 8) & 0xFF
+        raw[base + DEFAULT_TRIG_FLAGS_OFF + 1] = dtf & 0xFF
 
     # ── Per-step note, velocity, micro-timing locks ────────────────────────
+
+    # FX (track 12): add lock trigs on steps 2 and 6
+    fx_base = 4 + 12 * TRACK_V5_SZ
+    fx_trig_area = bytearray(raw[fx_base:fx_base + 112])
+    set_trig_flags(fx_trig_area, 2, TRIG_LOCK)
+    set_trig_flags(fx_trig_area, 6, TRIG_LOCK)
+    raw[fx_base:fx_base + 112] = fx_trig_area
 
     # BD (track 0): velocity accent on beat 1 (step 0)
     bd_base = 4 + 0 * TRACK_V5_SZ
@@ -421,6 +488,64 @@ def make_pattern():
     add_plock(raw, seq, 0, PL_LFO_SPH, {0: 0, 4: 32, 8: 64, 12: 96})  # 0°, 90°, 180°, 270°
     seq += 1
 
+    # ── FX track (track 12) plocks ────────────────────────────────────────
+
+    # FX: delay time variation
+    add_plock(raw, seq, 12, FX_PL_DELAY_TIME, {0: 40, 4: 80, 8: 60, 12: 100})
+    seq += 1
+
+    # FX: delay feedback
+    add_plock(raw, seq, 12, FX_PL_DELAY_FB, {0: 64, 8: 90})
+    seq += 1
+
+    # FX: delay ping-pong toggle
+    add_plock(raw, seq, 12, FX_PL_DELAY_PP, {0: 0, 4: 1, 8: 0, 12: 1})
+    seq += 1
+
+    # FX: delay width (bipolar)
+    add_plock(raw, seq, 12, FX_PL_DELAY_WID, {0: 32, 8: 96})  # -32, +32
+    seq += 1
+
+    # FX: reverb decay
+    add_plock(raw, seq, 12, FX_PL_REVERB_DEC, {0: 90, 4: 40, 8: 127, 12: 110})
+    seq += 1
+
+    # FX: reverb gain (bipolar)
+    add_plock(raw, seq, 12, FX_PL_REVERB_GAI, {0: 80, 8: 48})  # +16, -16
+    seq += 1
+
+    # FX: distortion amount
+    add_plock(raw, seq, 12, FX_PL_DIST_AMT, {0: 30, 4: 80, 8: 50, 12: 100})
+    seq += 1
+
+    # FX: distortion symmetry (bipolar)
+    add_plock(raw, seq, 12, FX_PL_DIST_SYM, {4: 40, 12: 88})  # -24, +24
+    seq += 1
+
+    # FX: distortion delay routing
+    add_plock(raw, seq, 12, FX_PL_DIST_DEL, {0: 0, 8: 1})  # PRE, POST
+    seq += 1
+
+    # FX: compressor threshold
+    add_plock(raw, seq, 12, FX_PL_COMP_THR, {0: 80, 4: 50, 8: 100, 12: 30})
+    seq += 1
+
+    # FX: compressor sidechain EQ
+    add_plock(raw, seq, 12, FX_PL_COMP_SEQ, {0: 0, 4: 1, 8: 2, 12: 3})  # OFF, LPF, HPF, HIT
+    seq += 1
+
+    # FX: FX LFO speed (bipolar)
+    add_plock(raw, seq, 12, FX_PL_LFO_SPD, {0: 80, 8: 40})  # +16, -24
+    seq += 1
+
+    # FX: FX LFO destination
+    add_plock(raw, seq, 12, FX_PL_LFO_DST, {0: 37, 4: 0, 8: 11, 12: 18})  # NONE, DEL:TIM, REV:DEC, DST:AMT
+    seq += 1
+
+    # FX: FX LFO waveform
+    add_plock(raw, seq, 12, FX_PL_LFO_WAV, {0: 0, 4: 2, 8: 4, 12: 6})
+    seq += 1
+
     return raw
 
 
@@ -460,6 +585,36 @@ def make_kit(track_machines):
         lfo_vals = [32, 1, 0, 0, 0, 0, 0, 64]
         for i, val in enumerate(lfo_vals):
             raw[track_base + 0x5E + i * 2] = val
+
+    # ── FX track kit defaults (absolute offsets in kit) ──────────────────
+    # Delay: time=64, pp=0, wid=64, fb=32, hpf=0, lpf=127, rev=0, vol=100
+    fx_delay = [64, 0, 64, 32, 0, 127, 0, 100]
+    for i, val in enumerate(fx_delay):
+        raw[FX_KIT_BASE + i * 2] = val
+
+    # Dist DOV=0, Dist DEL routing=0(PRE)
+    raw[FX_KIT_BASE + 8 * 2] = 0    # DOV
+    raw[FX_KIT_BASE + 9 * 2] = 0    # DEL routing (PRE)
+
+    # Reverb: pre=32, dec=80, frq=64, gai=64, hpf=0, lpf=127, vol=80
+    fx_reverb = [32, 80, 64, 64, 0, 127, 80]
+    for i, val in enumerate(fx_reverb):
+        raw[FX_KIT_BASE + (10 + i) * 2] = val
+
+    # Dist REV routing=0(PRE), Dist AMT=0, Dist SYM=64(center)
+    raw[FX_KIT_BASE + 17 * 2] = 0    # REV routing (PRE)
+    raw[FX_KIT_BASE + 18 * 2] = 0    # AMT
+    raw[FX_KIT_BASE + 19 * 2] = 64   # SYM (center)
+
+    # Compressor: thr=96, atk=3(=1ms), rel=4(=1s), rat=2(=1:8), seq=0(OFF), mup=0, mix=64, vol=100
+    fx_comp = [96, 3, 4, 2, 0, 0, 64, 100]
+    for i, val in enumerate(fx_comp):
+        raw[FX_KIT_BASE + (21 + i) * 2] = val
+
+    # FX LFO: spd=64(stopped), mul=1, fad=64(none), dst=37(NONE), wav=0, phs=0, mod=0, dep=64
+    fx_lfo = [64, 1, 64, 37, 0, 0, 0, 64]
+    for i, val in enumerate(fx_lfo):
+        raw[FX_KIT_BASE + (29 + i) * 2] = val
 
     return raw
 

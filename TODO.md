@@ -1,20 +1,5 @@
 # Analog Rytm Pattern Editor — TODO
 
-## Remaining Features
-
-### LFO Frequency Reference
-- There is a bit somewhere that switches LFO speed reference between track BPM and fixed 120 BPM
-- Need to find where this bit lives in the sysex data and expose it in the editor
-
-### SY DUAL VCO Waveform Enum
-- The CFG parameter on SY DUAL VCO needs a proper enum mapping
-- Requires figuring out the exact value-to-label mapping from the hardware
-
-### FX Track
-- The FX track (track 13) has a completely different parameter layout
-- Delay, Reverb, Distortion, Compressor parameters need their own section definitions
-- Currently not displayed or editable
-
 ## Code Quality
 
 ### Clean Up & Modularize
