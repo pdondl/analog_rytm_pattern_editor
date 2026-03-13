@@ -4,7 +4,7 @@
 
 ### 1. ~~Split monolithic pattern_viewer.html into modules~~ ✅
 Split into 7 files: `style.css`, `ar-state.js`, `ar-constants.js`,
-`ar-sysex.js`, `ar-editor.js`, `ar-midi.js`, `pattern_viewer.html` (shell).
+`ar-sysex.js`, `ar-editor.js`, `ar-midi.js`, `plock.html` (shell).
 Tagged `v1.0` before split.
 
 ### 2. ~~Magic hex offsets → named constants~~ ✅
