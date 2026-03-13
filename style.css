@@ -579,6 +579,14 @@ button:disabled { opacity: 0.35; cursor: default; }
   font-size: 0.63em;
 }
 
+/* ─── Credit line ────────────────────────────────────────────────────────── */
+.credit {
+  margin-top: 14px;
+  font-size: 0.7em;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+
 /* ─── Log panel ──────────────────────────────────────────────────────────── */
 .log-toggle {
   display: block;
