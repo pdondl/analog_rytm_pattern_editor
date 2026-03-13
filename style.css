@@ -582,8 +582,8 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* ─── Credit line ────────────────────────────────────────────────────────── */
 .credit {
   margin-top: 14px;
-  font-size: 0.7em;
-  color: var(--muted);
+  font-size: 0.8em;
+  opacity: 0.55;
   letter-spacing: 0.5px;
 }
 
@@ -594,6 +594,11 @@ button:disabled { opacity: 0.35; cursor: default; }
   font-size: 0.75em;
   padding: 4px 12px;
   position: relative;
+  opacity: 0.55;
+  border-color: var(--border);
+}
+.log-toggle:hover {
+  opacity: 0.85;
 }
 .log-toggle.log-has-errors::after {
   content: '';
