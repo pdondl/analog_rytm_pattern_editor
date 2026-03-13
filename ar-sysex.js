@@ -86,7 +86,7 @@ var S = AR.state;
       const dsLo = dataSz & 0x7F;
 
       const syx = new Uint8Array(10 + data.length + 5);
-      syx[0] = 0xF0;
+      syx[0] = SYSEX_START;
       syx[1] = 0x00;
       syx[2] = AR_ELEKTRON_MFR_1;
       syx[3] = AR_ELEKTRON_MFR_2;
@@ -102,7 +102,7 @@ var S = AR.state;
       syx[t + 1] = chkLo;
       syx[t + 2] = dsHi;
       syx[t + 3] = dsLo;
-      syx[t + 4] = 0xF7;
+      syx[t + 4] = SYSEX_END;
       return syx;
     }
 
@@ -179,18 +179,18 @@ var S = AR.state;
           const plType = raw[base];
           const trkNr  = raw[base + 1];
 
-          // Fine companion: type=0x80, track=0x80 — pair with preceding coarse
-          if (plType === 0x80 && trkNr === 0x80 && lastCoarseTrk >= 0) {
+          // Fine companion: type=PLOCK_FINE_FLAG, track=PLOCK_FINE_FLAG — pair with preceding coarse
+          if (plType === PLOCK_FINE_FLAG && trkNr === PLOCK_FINE_FLAG && lastCoarseTrk >= 0) {
             let arr = fine[lastCoarseTrk].get(lastCoarseType);
-            if (!arr) { arr = new Uint8Array(AR_NUM_STEPS).fill(0xFF); fine[lastCoarseTrk].set(lastCoarseType, arr); }
+            if (!arr) { arr = new Uint8Array(AR_NUM_STEPS).fill(PLOCK_NO_VALUE); fine[lastCoarseTrk].set(lastCoarseType, arr); }
             for (let s = 0; s < AR_NUM_STEPS; s++) {
               const v = raw[base + 2 + s];
-              if (v !== 0xFF) arr[s] = v;
+              if (v !== PLOCK_NO_VALUE) arr[s] = v;
             }
             continue;
           }
 
-          if (plType === 0xFF || trkNr === 0xFF || trkNr >= AR_NUM_TRACKS) {
+          if (plType === PLOCK_TYPE_UNUSED || trkNr === PLOCK_TYPE_UNUSED || trkNr >= AR_NUM_TRACKS) {
             lastCoarseType = -1; lastCoarseTrk = -1;
             continue;
           }
@@ -198,11 +198,11 @@ var S = AR.state;
           lastCoarseType = plType; lastCoarseTrk = trkNr;
 
           let arr = values[trkNr].get(plType);
-          if (!arr) { arr = new Uint8Array(AR_NUM_STEPS).fill(0xFF); values[trkNr].set(plType, arr); }
+          if (!arr) { arr = new Uint8Array(AR_NUM_STEPS).fill(PLOCK_NO_VALUE); values[trkNr].set(plType, arr); }
 
           for (let s = 0; s < AR_NUM_STEPS; s++) {
             const v = raw[base + 2 + s];
-            if (v !== 0xFF) { arr[s] = v; map[trkNr][s] = 1; }
+            if (v !== PLOCK_NO_VALUE) { arr[s] = v; map[trkNr][s] = 1; }
           }
         }
       }
@@ -218,7 +218,7 @@ var S = AR.state;
         const trackBase = 4 + t * TRACK_V5_SZ;
         for (let s = 0; s < AR_NUM_STEPS; s++) {
           const v = raw[trackBase + SOUND_LOCK_OFFSET + s];
-          if (v !== 0xFF) slots.add(v);
+          if (v !== SOUND_LOCK_NONE) slots.add(v);
         }
       }
       return slots;

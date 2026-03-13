@@ -7,6 +7,134 @@
     const AR_SYSEX_DUMPX_ID_PATTERN  = 0x5A;   // workbuffer pattern dump
     const AR_SYSEX_DUMP_ID_KIT       = 0x52;   // stored kit dump
     const AR_SYSEX_DUMPX_ID_KIT      = 0x58;   // workbuffer kit dump
+
+    // ─── SysEx protocol bytes ────────────────────────────────────────────────
+    const SYSEX_START                = 0xF0;
+    const SYSEX_END                  = 0xF7;
+
+    // ─── Plock sentinel values ───────────────────────────────────────────────
+    const PLOCK_TYPE_UNUSED          = 0xFF;   // empty plock slot (type or track)
+    const PLOCK_FINE_FLAG            = 0x80;   // marks fine-companion type/track byte
+    const PLOCK_NO_VALUE             = 0xFF;   // step has no plock value
+    const SOUND_LOCK_NONE            = 0xFF;   // no sound lock on step
+
+    // ─── Note byte bit fields ────────────────────────────────────────────────
+    const NOTE_CONDITION_BIT         = 0x80;   // bit 7: trig condition present
+    const NOTE_VALUE_MASK            = 0x7F;   // bits 6..0: MIDI note (0-127)
+    const NOTE_UNLOCKED              = 0x7F;   // note byte = 0x7F means "no note lock"
+
+    // ─── Micro-timing byte bit fields ────────────────────────────────────────
+    const UTIME_VALUE_MASK           = 0x3F;   // bits 5..0: timing offset magnitude
+    const UTIME_SIGN_BIT             = 0x20;   // bit 5: 1 = negative (early)
+    const UTIME_UPPER_MASK           = 0xC0;   // bits 7..6: trig condition bits
+
+    // ─── Track speed byte bit fields ─────────────────────────────────────────
+    const SPEED_VALUE_MASK           = 0x07;   // bits 2..0: speed index (0-6)
+    const SPEED_FLAGS_MASK           = 0xF8;   // bits 7..3: preserved flags
+
+    // ─── Retrig rate/length byte bit fields ──────────────────────────────────
+    const RETRIG_RATE_MASK           = 0x1F;   // bits 4..0: rate value
+    const RETRIG_RATE_FLAGS          = 0xE0;   // bits 7..5: trig condition bits
+    const RETRIG_LEN_VALUE_MASK      = 0x7F;   // bits 6..0: length value
+    const RETRIG_LEN_FLAG            = 0x80;   // bit 7: trig condition bit
+
+    // ─── Note length sentinel ────────────────────────────────────────────────
+    const NOTE_LEN_INF               = 0x7F;   // display as INF
+
+    // ─── Trig condition encoding (7-bit value spread across 4 bytes) ─────────
+    const TRIG_COND_NOTE_SHIFT_BIT   = 0x40;   // bit 6 in cond → bit 7 in note
+    const TRIG_COND_MICRO_BITS       = 0x30;   // bits 5..4 in cond → bits 7..6 in micro
+    const TRIG_COND_LEN_BIT          = 0x08;   // bit 3 in cond → bit 7 in retrig len
+    const TRIG_COND_RATE_BITS        = 0x07;   // bits 2..0 in cond → bits 7..5 in retrig rate
+
+    // ─── Synth param range ───────────────────────────────────────────────────
+    const PLOCK_SYNTH_PARAM_MAX      = 0x07;   // plock types 0x00-0x07 are synth params
+
+    // ─── ar_sound_t field offsets (s_u16_t: hi byte = value, lo byte = fine) ─
+    // From libanalogrytm/sound.h
+    const SND_SYNTH_PARAM_1          = 0x1C;
+    const SND_SYNTH_PARAM_2          = 0x1E;
+    const SND_SYNTH_PARAM_3          = 0x20;
+    const SND_SYNTH_PARAM_4          = 0x22;
+    const SND_SYNTH_PARAM_5          = 0x24;
+    const SND_SYNTH_PARAM_6          = 0x26;
+    const SND_SYNTH_PARAM_7          = 0x28;
+    const SND_SYNTH_PARAM_8          = 0x2A;
+    const SND_SAMPLE_TUNE            = 0x2C;
+    const SND_SAMPLE_FINE_TUNE       = 0x2E;
+    const SND_SAMPLE_NR              = 0x30;
+    const SND_SAMPLE_BR              = 0x32;
+    const SND_SAMPLE_START           = 0x34;
+    const SND_SAMPLE_END             = 0x36;
+    const SND_SAMPLE_LOOP_FLAG       = 0x38;
+    const SND_SAMPLE_VOLUME          = 0x3A;
+    const SND_FLT_ATTACK             = 0x3C;
+    const SND_FLT_SUSTAIN            = 0x3E;
+    const SND_FLT_DECAY              = 0x40;
+    const SND_FLT_RELEASE            = 0x42;
+    const SND_FLT_CUTOFF             = 0x44;
+    const SND_FLT_RES                = 0x46;
+    const SND_FLT_TYPE               = 0x48;
+    const SND_FLT_ENV                = 0x4A;
+    const SND_AMP_ATTACK             = 0x4C;
+    const SND_AMP_HOLD               = 0x4E;
+    const SND_AMP_DECAY              = 0x50;
+    const SND_AMP_OVERDRIVE          = 0x52;
+    const SND_AMP_DELAY_SEND         = 0x54;
+    const SND_AMP_REVERB_SEND        = 0x56;
+    const SND_AMP_PAN                = 0x58;
+    const SND_AMP_VOLUME             = 0x5A;
+    // 0x5C: unused/padding
+    const SND_LFO_SPEED              = 0x5E;
+    const SND_LFO_MULTIPLIER         = 0x60;
+    const SND_LFO_FADE               = 0x62;
+    const SND_LFO_DEST               = 0x64;
+    const SND_LFO_WAV                = 0x66;
+    const SND_LFO_START_PHASE        = 0x68;
+    const SND_LFO_MODE               = 0x6A;
+    const SND_LFO_DEPTH              = 0x6C;
+
+    // ─── ar_kit_t FX field offsets ───────────────────────────────────────────
+    // From libanalogrytm/kit.h — each is s_u16_t (hi byte = value)
+    const KIT_FX_DELAY_TIME          = 0x07CA;
+    const KIT_FX_DELAY_PINGPONG      = 0x07CC;
+    const KIT_FX_DELAY_WIDTH         = 0x07CE;
+    const KIT_FX_DELAY_FEEDBACK      = 0x07D0;
+    const KIT_FX_DELAY_HPF           = 0x07D2;
+    const KIT_FX_DELAY_LPF           = 0x07D4;
+    const KIT_FX_DELAY_REV_SEND      = 0x07D6;
+    const KIT_FX_DELAY_VOLUME        = 0x07D8;
+    const KIT_FX_DIST_REV_SEND       = 0x07DA;
+    const KIT_FX_DIST_DELAY_PP       = 0x07DC;
+    const KIT_FX_REVERB_PRE          = 0x07DE;
+    const KIT_FX_REVERB_DECAY        = 0x07E0;
+    const KIT_FX_REVERB_FREQ         = 0x07E2;
+    const KIT_FX_REVERB_GAIN         = 0x07E4;
+    const KIT_FX_REVERB_HPF          = 0x07E6;
+    const KIT_FX_REVERB_LPF          = 0x07E8;
+    const KIT_FX_REVERB_VOLUME       = 0x07EA;
+    const KIT_FX_DIST_REV_PP         = 0x07EC;
+    const KIT_FX_DIST_AMOUNT         = 0x07EE;
+    const KIT_FX_DIST_SYM            = 0x07F0;
+    // 0x07F2: unused/padding
+    const KIT_FX_COMP_THRESHOLD      = 0x07F4;
+    const KIT_FX_COMP_ATTACK         = 0x07F6;
+    const KIT_FX_COMP_RELEASE        = 0x07F8;
+    const KIT_FX_COMP_RATIO          = 0x07FA;
+    const KIT_FX_COMP_SEQ            = 0x07FC;
+    const KIT_FX_COMP_GAIN           = 0x07FE;
+    const KIT_FX_COMP_MIX            = 0x0800;
+    const KIT_FX_COMP_VOLUME         = 0x0802;
+    const KIT_FX_LFO_SPEED           = 0x0804;
+    const KIT_FX_LFO_MULTIPLIER      = 0x0806;
+    const KIT_FX_LFO_FADE            = 0x0808;
+    const KIT_FX_LFO_DEST            = 0x080A;
+    const KIT_FX_LFO_WAV             = 0x080C;
+    const KIT_FX_LFO_START_PHASE     = 0x080E;
+    const KIT_FX_LFO_MODE            = 0x0810;
+    const KIT_FX_LFO_DEPTH           = 0x0812;
+
+    // ─── Trig flags ──────────────────────────────────────────────────────────
     const AR_TRIG_ENABLE             = 0x0001;  // bit 0
     const AR_TRIG_RETRIG             = 0x0002;  // bit 1
     const AR_TRIG_MUTE               = 0x0004;  // bit 2
@@ -107,16 +235,16 @@
 
     // Workbuffer pattern request (0x6A)
     const PATTERN_REQUEST_X = new Uint8Array([
-      0xF0, 0x00, 0x20, 0x3C, 0x07,
+      SYSEX_START, 0x00, AR_ELEKTRON_MFR_1, AR_ELEKTRON_MFR_2, AR_PRODUCT_ID,
       0x00, 0x6A, 0x01, 0x01, 0x00,
-      0x00, 0x00, 0x00, 0x05, 0xF7
+      0x00, 0x00, 0x00, 0x05, SYSEX_END
     ]);
 
     // Workbuffer kit request (0x68)
     const KIT_REQUEST_X = new Uint8Array([
-      0xF0, 0x00, 0x20, 0x3C, 0x07,
+      SYSEX_START, 0x00, AR_ELEKTRON_MFR_1, AR_ELEKTRON_MFR_2, AR_PRODUCT_ID,
       0x00, 0x68, 0x01, 0x01, 0x00,
-      0x00, 0x00, 0x00, 0x05, 0xF7
+      0x00, 0x00, 0x00, 0x05, SYSEX_END
     ]);
 
     const TRACK_NAMES = ['BD','SD','RS','CP','BT','LT','MT','HT','CH','OH','CY','CB','FX'];
@@ -326,47 +454,47 @@
     // Maps plock_type → { section, label, soundOff, [bipolar], [enum], [pan], [inf127], [lfoDest] }
 
     const PLOCK_INFO = {
-      0x00: { sec:'SRC',  lbl:'P1',   sndOff:0x1C },
-      0x01: { sec:'SRC',  lbl:'P2',   sndOff:0x1E },
-      0x02: { sec:'SRC',  lbl:'P3',   sndOff:0x20 },
-      0x03: { sec:'SRC',  lbl:'P4',   sndOff:0x22 },
-      0x04: { sec:'SRC',  lbl:'P5',   sndOff:0x24 },
-      0x05: { sec:'SRC',  lbl:'P6',   sndOff:0x26 },
-      0x06: { sec:'SRC',  lbl:'P7',   sndOff:0x28 },
-      0x07: { sec:'SRC',  lbl:'P8',   sndOff:0x2A },
-      0x08: { sec:'SMPL', lbl:'TUN',  sndOff:0x2C, bipolar:true },
-      0x09: { sec:'SMPL', lbl:'FIN',  sndOff:0x2E, bipolar:true },
-      0x0A: { sec:'SMPL', lbl:'SMP',  sndOff:0x30 },
-      0x0B: { sec:'SMPL', lbl:'BR',   sndOff:0x32 },
-      0x0C: { sec:'SMPL', lbl:'STA',  sndOff:0x34 },
-      0x0D: { sec:'SMPL', lbl:'END',  sndOff:0x36 },
-      0x0E: { sec:'SMPL', lbl:'LOP',  sndOff:0x38, enum:['OFF','ON'] },
-      0x0F: { sec:'SMPL', lbl:'LEV',  sndOff:0x3A },
-      0x10: { sec:'FLTR', lbl:'ATK',  sndOff:0x3C },
-      0x11: { sec:'FLTR', lbl:'SUS',  sndOff:0x3E },
-      0x12: { sec:'FLTR', lbl:'DEC',  sndOff:0x40, inf127:true },
-      0x13: { sec:'FLTR', lbl:'REL',  sndOff:0x42, inf127:true },
-      0x14: { sec:'FLTR', lbl:'FRQ',  sndOff:0x44 },
-      0x15: { sec:'FLTR', lbl:'RES',  sndOff:0x46 },
-      0x16: { sec:'FLTR', lbl:'TYP',  sndOff:0x48, enum:FLT_TYPE_NAMES },
-      0x17: { sec:'FLTR', lbl:'ENV',  sndOff:0x4A, bipolar:true },
-      0x18: { sec:'AMP',  lbl:'ATK',  sndOff:0x4C },
-      0x19: { sec:'AMP',  lbl:'HLD',  sndOff:0x4E },
-      0x1A: { sec:'AMP',  lbl:'DEC',  sndOff:0x50, inf127:true },
-      0x1B: { sec:'AMP',  lbl:'OVR',  sndOff:0x52 },
-      0x1C: { sec:'AMP',  lbl:'DEL',  sndOff:0x54 },
-      0x1D: { sec:'AMP',  lbl:'REV',  sndOff:0x56 },
-      0x1E: { sec:'AMP',  lbl:'PAN',  sndOff:0x58, pan:true },
-      0x1F: { sec:'AMP',  lbl:'VOL',  sndOff:0x5A },
+      0x00: { sec:'SRC',  lbl:'P1',   sndOff:SND_SYNTH_PARAM_1 },
+      0x01: { sec:'SRC',  lbl:'P2',   sndOff:SND_SYNTH_PARAM_2 },
+      0x02: { sec:'SRC',  lbl:'P3',   sndOff:SND_SYNTH_PARAM_3 },
+      0x03: { sec:'SRC',  lbl:'P4',   sndOff:SND_SYNTH_PARAM_4 },
+      0x04: { sec:'SRC',  lbl:'P5',   sndOff:SND_SYNTH_PARAM_5 },
+      0x05: { sec:'SRC',  lbl:'P6',   sndOff:SND_SYNTH_PARAM_6 },
+      0x06: { sec:'SRC',  lbl:'P7',   sndOff:SND_SYNTH_PARAM_7 },
+      0x07: { sec:'SRC',  lbl:'P8',   sndOff:SND_SYNTH_PARAM_8 },
+      0x08: { sec:'SMPL', lbl:'TUN',  sndOff:SND_SAMPLE_TUNE, bipolar:true },
+      0x09: { sec:'SMPL', lbl:'FIN',  sndOff:SND_SAMPLE_FINE_TUNE, bipolar:true },
+      0x0A: { sec:'SMPL', lbl:'SMP',  sndOff:SND_SAMPLE_NR },
+      0x0B: { sec:'SMPL', lbl:'BR',   sndOff:SND_SAMPLE_BR },
+      0x0C: { sec:'SMPL', lbl:'STA',  sndOff:SND_SAMPLE_START },
+      0x0D: { sec:'SMPL', lbl:'END',  sndOff:SND_SAMPLE_END },
+      0x0E: { sec:'SMPL', lbl:'LOP',  sndOff:SND_SAMPLE_LOOP_FLAG, enum:['OFF','ON'] },
+      0x0F: { sec:'SMPL', lbl:'LEV',  sndOff:SND_SAMPLE_VOLUME },
+      0x10: { sec:'FLTR', lbl:'ATK',  sndOff:SND_FLT_ATTACK },
+      0x11: { sec:'FLTR', lbl:'SUS',  sndOff:SND_FLT_SUSTAIN },
+      0x12: { sec:'FLTR', lbl:'DEC',  sndOff:SND_FLT_DECAY, inf127:true },
+      0x13: { sec:'FLTR', lbl:'REL',  sndOff:SND_FLT_RELEASE, inf127:true },
+      0x14: { sec:'FLTR', lbl:'FRQ',  sndOff:SND_FLT_CUTOFF },
+      0x15: { sec:'FLTR', lbl:'RES',  sndOff:SND_FLT_RES },
+      0x16: { sec:'FLTR', lbl:'TYP',  sndOff:SND_FLT_TYPE, enum:FLT_TYPE_NAMES },
+      0x17: { sec:'FLTR', lbl:'ENV',  sndOff:SND_FLT_ENV, bipolar:true },
+      0x18: { sec:'AMP',  lbl:'ATK',  sndOff:SND_AMP_ATTACK },
+      0x19: { sec:'AMP',  lbl:'HLD',  sndOff:SND_AMP_HOLD },
+      0x1A: { sec:'AMP',  lbl:'DEC',  sndOff:SND_AMP_DECAY, inf127:true },
+      0x1B: { sec:'AMP',  lbl:'OVR',  sndOff:SND_AMP_OVERDRIVE },
+      0x1C: { sec:'AMP',  lbl:'DEL',  sndOff:SND_AMP_DELAY_SEND },
+      0x1D: { sec:'AMP',  lbl:'REV',  sndOff:SND_AMP_REVERB_SEND },
+      0x1E: { sec:'AMP',  lbl:'PAN',  sndOff:SND_AMP_PAN, pan:true },
+      0x1F: { sec:'AMP',  lbl:'VOL',  sndOff:SND_AMP_VOLUME },
       // 0x20: unknown — skipped
-      0x21: { sec:'LFO',  lbl:'SPD',  sndOff:0x5E, bipolar:true },
-      0x22: { sec:'LFO',  lbl:'MUL',  sndOff:0x60, enum:LFO_MUL_NAMES },
-      0x23: { sec:'LFO',  lbl:'FAD',  sndOff:0x62, bipolar:true },
-      0x24: { sec:'LFO',  lbl:'DST',  sndOff:0x64, lfoDest:true },
-      0x25: { sec:'LFO',  lbl:'WAV',  sndOff:0x66, enum:LFO_WAV_NAMES },
-      0x26: { sec:'LFO',  lbl:'SPH',  sndOff:0x68, lfoPhase:true },
-      0x27: { sec:'LFO',  lbl:'MOD',  sndOff:0x6A, enum:LFO_TRIG_NAMES },
-      0x28: { sec:'LFO',  lbl:'DEP',  sndOff:0x6C, bipolar:true },
+      0x21: { sec:'LFO',  lbl:'SPD',  sndOff:SND_LFO_SPEED, bipolar:true },
+      0x22: { sec:'LFO',  lbl:'MUL',  sndOff:SND_LFO_MULTIPLIER, enum:LFO_MUL_NAMES },
+      0x23: { sec:'LFO',  lbl:'FAD',  sndOff:SND_LFO_FADE, bipolar:true },
+      0x24: { sec:'LFO',  lbl:'DST',  sndOff:SND_LFO_DEST, lfoDest:true },
+      0x25: { sec:'LFO',  lbl:'WAV',  sndOff:SND_LFO_WAV, enum:LFO_WAV_NAMES },
+      0x26: { sec:'LFO',  lbl:'SPH',  sndOff:SND_LFO_START_PHASE, lfoPhase:true },
+      0x27: { sec:'LFO',  lbl:'MOD',  sndOff:SND_LFO_MODE, enum:LFO_TRIG_NAMES },
+      0x28: { sec:'LFO',  lbl:'DEP',  sndOff:SND_LFO_DEPTH, bipolar:true },
     };
 
     const SECTION_KEYS = ['SRC','SMPL','FLTR','AMP','LFO'];
@@ -388,46 +516,46 @@
 
     const FX_PLOCK_INFO = {
       // DELAY (plock types 0-7)
-      0:  { sec:'DELAY',  lbl:'TIME', kitOff:0x07CA, noteLen:true },
-      1:  { sec:'DELAY',  lbl:'PP',   kitOff:0x07CC, enum:['OFF','ON'] },
-      2:  { sec:'DELAY',  lbl:'WID',  kitOff:0x07CE, bipolar:true },
-      3:  { sec:'DELAY',  lbl:'FB',   kitOff:0x07D0, pct200:true },
-      4:  { sec:'DELAY',  lbl:'HPF',  kitOff:0x07D2 },
-      5:  { sec:'DELAY',  lbl:'LPF',  kitOff:0x07D4 },
-      6:  { sec:'DELAY',  lbl:'REV',  kitOff:0x07D6 },
-      7:  { sec:'DELAY',  lbl:'VOL',  kitOff:0x07D8 },
+      0:  { sec:'DELAY',  lbl:'TIME', kitOff:KIT_FX_DELAY_TIME, noteLen:true },
+      1:  { sec:'DELAY',  lbl:'PP',   kitOff:KIT_FX_DELAY_PINGPONG, enum:['OFF','ON'] },
+      2:  { sec:'DELAY',  lbl:'WID',  kitOff:KIT_FX_DELAY_WIDTH, bipolar:true },
+      3:  { sec:'DELAY',  lbl:'FB',   kitOff:KIT_FX_DELAY_FEEDBACK, pct200:true },
+      4:  { sec:'DELAY',  lbl:'HPF',  kitOff:KIT_FX_DELAY_HPF },
+      5:  { sec:'DELAY',  lbl:'LPF',  kitOff:KIT_FX_DELAY_LPF },
+      6:  { sec:'DELAY',  lbl:'REV',  kitOff:KIT_FX_DELAY_REV_SEND },
+      7:  { sec:'DELAY',  lbl:'VOL',  kitOff:KIT_FX_DELAY_VOLUME },
       // DISTORTION (plock types 8,9,17,18,19)
-      8:  { sec:'DIST',   lbl:'DOV',  kitOff:0x07DA },
-      9:  { sec:'DIST',   lbl:'DEL',  kitOff:0x07DC, enum:['PRE','POST'] },
-      17: { sec:'DIST',   lbl:'REV',  kitOff:0x07EC, enum:['PRE','POST'] },
-      18: { sec:'DIST',   lbl:'AMT',  kitOff:0x07EE },
-      19: { sec:'DIST',   lbl:'SYM',  kitOff:0x07F0, bipolar:true },
+      8:  { sec:'DIST',   lbl:'DOV',  kitOff:KIT_FX_DIST_REV_SEND },
+      9:  { sec:'DIST',   lbl:'DEL',  kitOff:KIT_FX_DIST_DELAY_PP, enum:['PRE','POST'] },
+      17: { sec:'DIST',   lbl:'REV',  kitOff:KIT_FX_DIST_REV_PP, enum:['PRE','POST'] },
+      18: { sec:'DIST',   lbl:'AMT',  kitOff:KIT_FX_DIST_AMOUNT },
+      19: { sec:'DIST',   lbl:'SYM',  kitOff:KIT_FX_DIST_SYM, bipolar:true },
       // REVERB (plock types 10-16)
-      10: { sec:'REVERB', lbl:'PRE',  kitOff:0x07DE },
-      11: { sec:'REVERB', lbl:'DEC',  kitOff:0x07E0, inf127:true },
-      12: { sec:'REVERB', lbl:'FRQ',  kitOff:0x07E2 },
-      13: { sec:'REVERB', lbl:'GAI',  kitOff:0x07E4, bipolar:true },
-      14: { sec:'REVERB', lbl:'HPF',  kitOff:0x07E6 },
-      15: { sec:'REVERB', lbl:'LPF',  kitOff:0x07E8 },
-      16: { sec:'REVERB', lbl:'VOL',  kitOff:0x07EA },
+      10: { sec:'REVERB', lbl:'PRE',  kitOff:KIT_FX_REVERB_PRE },
+      11: { sec:'REVERB', lbl:'DEC',  kitOff:KIT_FX_REVERB_DECAY, inf127:true },
+      12: { sec:'REVERB', lbl:'FRQ',  kitOff:KIT_FX_REVERB_FREQ },
+      13: { sec:'REVERB', lbl:'GAI',  kitOff:KIT_FX_REVERB_GAIN, bipolar:true },
+      14: { sec:'REVERB', lbl:'HPF',  kitOff:KIT_FX_REVERB_HPF },
+      15: { sec:'REVERB', lbl:'LPF',  kitOff:KIT_FX_REVERB_LPF },
+      16: { sec:'REVERB', lbl:'VOL',  kitOff:KIT_FX_REVERB_VOLUME },
       // COMPRESSOR (plock types 21-28)
-      21: { sec:'COMP',   lbl:'THR',  kitOff:0x07F4 },
-      22: { sec:'COMP',   lbl:'ATK',  kitOff:0x07F6, enum:COMP_ATK_NAMES },
-      23: { sec:'COMP',   lbl:'REL',  kitOff:0x07F8, enum:COMP_REL_NAMES },
-      24: { sec:'COMP',   lbl:'RAT',  kitOff:0x07FA, enum:COMP_RAT_NAMES },
-      25: { sec:'COMP',   lbl:'SEQ',  kitOff:0x07FC, enum:['OFF','LPF','HPF','HIT'] },
-      26: { sec:'COMP',   lbl:'MUP',  kitOff:0x07FE },
-      27: { sec:'COMP',   lbl:'MIX',  kitOff:0x0800 },
-      28: { sec:'COMP',   lbl:'VOL',  kitOff:0x0802 },
+      21: { sec:'COMP',   lbl:'THR',  kitOff:KIT_FX_COMP_THRESHOLD },
+      22: { sec:'COMP',   lbl:'ATK',  kitOff:KIT_FX_COMP_ATTACK, enum:COMP_ATK_NAMES },
+      23: { sec:'COMP',   lbl:'REL',  kitOff:KIT_FX_COMP_RELEASE, enum:COMP_REL_NAMES },
+      24: { sec:'COMP',   lbl:'RAT',  kitOff:KIT_FX_COMP_RATIO, enum:COMP_RAT_NAMES },
+      25: { sec:'COMP',   lbl:'SEQ',  kitOff:KIT_FX_COMP_SEQ, enum:['OFF','LPF','HPF','HIT'] },
+      26: { sec:'COMP',   lbl:'MUP',  kitOff:KIT_FX_COMP_GAIN },
+      27: { sec:'COMP',   lbl:'MIX',  kitOff:KIT_FX_COMP_MIX },
+      28: { sec:'COMP',   lbl:'VOL',  kitOff:KIT_FX_COMP_VOLUME },
       // FX LFO (plock types 29-36)
-      29: { sec:'FX_LFO', lbl:'SPD',  kitOff:0x0804, bipolar:true },
-      30: { sec:'FX_LFO', lbl:'MUL',  kitOff:0x0806, enum:LFO_MUL_NAMES },
-      31: { sec:'FX_LFO', lbl:'FAD',  kitOff:0x0808, bipolar:true },
-      32: { sec:'FX_LFO', lbl:'DST',  kitOff:0x080A, fxLfoDest:true },
-      33: { sec:'FX_LFO', lbl:'WAV',  kitOff:0x080C, enum:LFO_WAV_NAMES },
-      34: { sec:'FX_LFO', lbl:'SPH',  kitOff:0x080E, lfoPhase:true },
-      35: { sec:'FX_LFO', lbl:'MOD',  kitOff:0x0810, enum:LFO_TRIG_NAMES },
-      36: { sec:'FX_LFO', lbl:'DEP',  kitOff:0x0812, bipolar:true },
+      29: { sec:'FX_LFO', lbl:'SPD',  kitOff:KIT_FX_LFO_SPEED, bipolar:true },
+      30: { sec:'FX_LFO', lbl:'MUL',  kitOff:KIT_FX_LFO_MULTIPLIER, enum:LFO_MUL_NAMES },
+      31: { sec:'FX_LFO', lbl:'FAD',  kitOff:KIT_FX_LFO_FADE, bipolar:true },
+      32: { sec:'FX_LFO', lbl:'DST',  kitOff:KIT_FX_LFO_DEST, fxLfoDest:true },
+      33: { sec:'FX_LFO', lbl:'WAV',  kitOff:KIT_FX_LFO_WAV, enum:LFO_WAV_NAMES },
+      34: { sec:'FX_LFO', lbl:'SPH',  kitOff:KIT_FX_LFO_START_PHASE, lfoPhase:true },
+      35: { sec:'FX_LFO', lbl:'MOD',  kitOff:KIT_FX_LFO_MODE, enum:LFO_TRIG_NAMES },
+      36: { sec:'FX_LFO', lbl:'DEP',  kitOff:KIT_FX_LFO_DEPTH, bipolar:true },
     };
 
     const FX_SECTION_KEYS = ['DELAY','REVERB','DIST','COMP','FX_LFO'];

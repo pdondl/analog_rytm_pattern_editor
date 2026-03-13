@@ -157,19 +157,19 @@ var setStatus = AR.setStatus;
             const veloRaw    = S.lastRaw[trackBase + VELOCITY_OFFSET + stepIdx];
             const lenRaw     = S.lastRaw[trackBase + NOTE_LEN_OFFSET + stepIdx];
             // notes bit 7: 1=no condition, 0=has condition (independent of note lock)
-            const hasTrigCond  = !beyond && (noteRaw & 0x80) === 0;
-            const noteLocked   = !beyond && (noteRaw & 0x7F) !== 0x7F;
-            const veloLocked   = !beyond && veloRaw !== 0xFF;
-            const lenLocked    = !beyond && lenRaw  !== 0xFF;
+            const hasTrigCond  = !beyond && (noteRaw & NOTE_CONDITION_BIT) === 0;
+            const noteLocked   = !beyond && (noteRaw & NOTE_VALUE_MASK) !== NOTE_UNLOCKED;
+            const veloLocked   = !beyond && veloRaw !== PLOCK_NO_VALUE;
+            const lenLocked    = !beyond && lenRaw  !== PLOCK_NO_VALUE;
             const microRaw     = S.lastRaw[trackBase + MICRO_TIMING_OFFSET + stepIdx];
-            const microVal     = microRaw & 0x3F;
-            const microSigned  = (microVal & 0x20) ? microVal - 64 : microVal;
+            const microVal     = microRaw & UTIME_VALUE_MASK;
+            const microSigned  = (microVal & UTIME_SIGN_BIT) ? microVal - 64 : microVal;
             const hasPlock = !beyond && (
               plockMap[t][stepIdx] !== 0 ||
               noteLocked || veloLocked || lenLocked || hasTrigCond || microSigned !== 0
             );
             const sndLock  = S.lastRaw[trackBase + SOUND_LOCK_OFFSET + stepIdx];
-            const hasSoundLock = !beyond && sndLock !== 0xFF;
+            const hasSoundLock = !beyond && sndLock !== SOUND_LOCK_NONE;
 
             // AR lock-trig: ENABLE set with SYN+SMP p-lock enabled (PL_EN)
             // and their switch state OFF (PL_SW=0).  When PL_EN is not set,
@@ -213,12 +213,12 @@ var setStatus = AR.setStatus;
             // Note length bar — only on triggered steps (lock-trigs don't sound)
             if (isOn && !beyond) {
               const defLen = S.lastRaw[trackBase + DEFAULT_NOTE_LEN_OFFSET];
-              const lenDisp = lenRaw !== 0xFF ? lenRaw : defLen;
-              if (lenDisp === 0x7F) {
+              const lenDisp = lenRaw !== PLOCK_NO_VALUE ? lenRaw : defLen;
+              if (lenDisp === NOTE_LEN_INF) {
                 const bar = document.createElement('div');
                 bar.className = 'note-len-bar inf';
                 cell.appendChild(bar);
-              } else if (lenDisp !== 0xFF) {
+              } else if (lenDisp !== PLOCK_NO_VALUE) {
                 const bar = document.createElement('div');
                 bar.className = 'note-len-bar';
                 bar.style.width = Math.round(lenDisp / 126 * 100) + '%';
@@ -476,7 +476,7 @@ var setStatus = AR.setStatus;
       const numSteps = raw[trackBase + NUM_STEPS_OFFSET];
       const tsDenom = (n) => n <= 16 ? 16 : n <= 32 ? 32 : n <= 48 ? 48 : 64;
       const speedByte = raw[trackBase + TRACK_SPEED_OFFSET];
-      const speedIdx  = speedByte & 0x07;
+      const speedIdx  = speedByte & SPEED_VALUE_MASK;
       const tsMakeArrow = (text, handler) => {
         const b = document.createElement('span');
         b.textContent = text; b.className = 'ts-arrow';
@@ -547,12 +547,12 @@ var setStatus = AR.setStatus;
         spdVal.textContent = TRACK_SPEED_LABELS[speedIdx] || '1x';
         spdGrp.appendChild(spdLbl); spdGrp.appendChild(spdVal);
         spdGrp.appendChild(tsMakeArrow('▼', () => {
-          const cur = raw[trackBase + TRACK_SPEED_OFFSET] & 0x07;
-          raw[trackBase + TRACK_SPEED_OFFSET] = (speedByte & 0xF8) | (cur === 0 ? 6 : cur - 1);
+          const cur = raw[trackBase + TRACK_SPEED_OFFSET] & SPEED_VALUE_MASK;
+          raw[trackBase + TRACK_SPEED_OFFSET] = (speedByte & SPEED_FLAGS_MASK) | (cur === 0 ? 6 : cur - 1);
         }));
         spdGrp.appendChild(tsMakeArrow('▲', () => {
-          const cur = raw[trackBase + TRACK_SPEED_OFFSET] & 0x07;
-          raw[trackBase + TRACK_SPEED_OFFSET] = (speedByte & 0xF8) | (cur >= 6 ? 0 : cur + 1);
+          const cur = raw[trackBase + TRACK_SPEED_OFFSET] & SPEED_VALUE_MASK;
+          raw[trackBase + TRACK_SPEED_OFFSET] = (speedByte & SPEED_FLAGS_MASK) | (cur >= 6 ? 0 : cur + 1);
         }));
         panel.appendChild(spdGrp);
       }
@@ -642,7 +642,7 @@ var setStatus = AR.setStatus;
 
       // Determine machine type: sound-locked → pool sound, else → kit
       const sndLock = S.lastRaw[trackBase + SOUND_LOCK_OFFSET + s];
-      const hasSoundLock = sndLock !== 0xFF;
+      const hasSoundLock = sndLock !== SOUND_LOCK_NONE;
       let stepMachineType = getTrackMachineType(t);
       let poolSound = null;
       if (hasSoundLock && S.soundPool.has(sndLock)) {
@@ -1176,15 +1176,15 @@ var setStatus = AR.setStatus;
     // When notes[s] bit 7 = 1 → no condition; bit 7 = 0 → has condition.
     function getTrigCondition(trackBase, s) {
       const noteRaw = S.lastRaw[trackBase + NOTE_OFFSET + s];
-      if ((noteRaw & 0x80) !== 0) return null; // bit 7 = 1 → no condition
+      if ((noteRaw & NOTE_CONDITION_BIT) !== 0) return null; // bit 7 = 1 → no condition
       const microRaw  = S.lastRaw[trackBase + MICRO_TIMING_OFFSET + s];
       const retLenRaw = S.lastRaw[trackBase + RETRIG_LENGTH_OFFSET + s];
       const retRatRaw = S.lastRaw[trackBase + RETRIG_RATE_OFFSET + s];
       let r = 0;
-      r  = (noteRaw   & 0x80) >> 1;  // bit 6  (always 0 for valid conditions 0-56)
-      r |= (microRaw  & 0xC0) >> 2;  // bits 5..4
-      r |= (retLenRaw & 0x80) >> 4;  // bit 3
-      r |= (retRatRaw & 0xE0) >> 5;  // bits 2..0
+      r  = (noteRaw   & NOTE_CONDITION_BIT) >> 1;  // bit 6  (always 0 for valid conditions 0-56)
+      r |= (microRaw  & UTIME_UPPER_MASK)   >> 2;  // bits 5..4
+      r |= (retLenRaw & RETRIG_LEN_FLAG)    >> 4;  // bit 3
+      r |= (retRatRaw & RETRIG_RATE_FLAGS)  >> 5;  // bits 2..0
       return r;
     }
 
@@ -1198,14 +1198,14 @@ var setStatus = AR.setStatus;
       const rOff = trackBase + RETRIG_RATE_OFFSET + s;
       if (val === null) {
         // Clear condition: set notes bit 7 = 1
-        S.lastRaw[nOff] = S.lastRaw[nOff] | 0x80;
+        S.lastRaw[nOff] = S.lastRaw[nOff] | NOTE_CONDITION_BIT;
         return;
       }
       // Distribute 7-bit value across scattered bits (matching C setter)
-      S.lastRaw[nOff] = (S.lastRaw[nOff] & ~0x80) | ((val & 0x40) << 1);
-      S.lastRaw[mOff] = (S.lastRaw[mOff] & ~0xC0) | ((val & 0x30) << 2);
-      S.lastRaw[lOff] = (S.lastRaw[lOff] & ~0x80) | ((val & 0x08) << 4);
-      S.lastRaw[rOff] = (S.lastRaw[rOff] & ~0xE0) | ((val & 0x07) << 5);
+      S.lastRaw[nOff] = (S.lastRaw[nOff] & ~NOTE_CONDITION_BIT) | ((val & TRIG_COND_NOTE_SHIFT_BIT) << 1);
+      S.lastRaw[mOff] = (S.lastRaw[mOff] & ~UTIME_UPPER_MASK)  | ((val & TRIG_COND_MICRO_BITS) << 2);
+      S.lastRaw[lOff] = (S.lastRaw[lOff] & ~RETRIG_LEN_FLAG)   | ((val & TRIG_COND_LEN_BIT) << 4);
+      S.lastRaw[rOff] = (S.lastRaw[rOff] & ~RETRIG_RATE_FLAGS) | ((val & TRIG_COND_RATE_BITS) << 5);
     }
 
     function buildTrigSection(t, s, flags) {
@@ -1213,17 +1213,17 @@ var setStatus = AR.setStatus;
 
       const noteRaw  = S.lastRaw[trackBase + NOTE_OFFSET + s];
       const defNote  = S.lastRaw[trackBase + DEFAULT_NOTE_OFFSET];
-      const noteLocked = (noteRaw !== 0xFF && noteRaw !== 0x7F);
-      const noteVal  = noteLocked ? midiNoteToName(noteRaw & 0x7F) : midiNoteToName(defNote);
+      const noteLocked = (noteRaw !== PLOCK_NO_VALUE && (noteRaw & NOTE_VALUE_MASK) !== NOTE_UNLOCKED);
+      const noteVal  = noteLocked ? midiNoteToName(noteRaw & NOTE_VALUE_MASK) : midiNoteToName(defNote);
 
       const veloRaw  = S.lastRaw[trackBase + VELOCITY_OFFSET + s];
       const defVelo  = S.lastRaw[trackBase + DEFAULT_VELOCITY_OFFSET];
-      const veloLocked = veloRaw !== 0xFF;
+      const veloLocked = veloRaw !== PLOCK_NO_VALUE;
       const veloVal  = veloLocked ? veloRaw : defVelo;
 
       const lenRaw   = S.lastRaw[trackBase + NOTE_LEN_OFFSET + s];
       const defLen   = S.lastRaw[trackBase + DEFAULT_NOTE_LEN_OFFSET];
-      const lenLocked = lenRaw !== 0xFF;
+      const lenLocked = lenRaw !== PLOCK_NO_VALUE;
       const lenVal   = noteLenStr(lenLocked ? lenRaw : defLen);
 
       const prob     = S.lastRaw[trackBase + TRIG_PROBABILITY_OFFSET];
@@ -1236,7 +1236,7 @@ var setStatus = AR.setStatus;
       const probLocked = trigCond !== null;
 
       const sndLock  = S.lastRaw[trackBase + SOUND_LOCK_OFFSET + s];
-      const hasSnd   = sndLock !== 0xFF;
+      const hasSnd   = sndLock !== SOUND_LOCK_NONE;
 
       let sndDisplay = hasSnd ? (sndLock + 1) : 'TRK';
       if (hasSnd && S.soundPool.has(sndLock)) {
@@ -1273,19 +1273,19 @@ var setStatus = AR.setStatus;
       };
       body.appendChild(makeParamRow('SND', sndDisplay, hasSnd, {
         min: 0, max: 128, rawVal: sndRawVal, displayFn: sndDispFn,
-        onChange: (v) => writeByte(sndOff, v >= 128 ? 0xFF : v),
+        onChange: (v) => writeByte(sndOff, v >= 128 ? SOUND_LOCK_NONE : v),
       }));
 
       // NOTE: edit the 7-bit note value, preserve bit 7 (trig condition flag)
       const noteOff = trackBase + NOTE_OFFSET + s;
-      const noteRawVal = noteLocked ? (noteRaw & 0x7F) : 128;
-      const noteEffective = noteLocked ? (noteRaw & 0x7F) : defNote;
+      const noteRawVal = noteLocked ? (noteRaw & NOTE_VALUE_MASK) : 128;
+      const noteEffective = noteLocked ? (noteRaw & NOTE_VALUE_MASK) : defNote;
       body.appendChild(makeParamRow('NOTE', noteVal, noteLocked, {
         min: 0, max: 128, rawVal: noteRawVal, initVal: noteEffective,
         displayFn: (v) => v >= 128 ? 'TRK' : midiNoteToName(v),
         onChange: (v) => {
-          if (v >= 128) { writeByte(noteOff, (noteRaw & 0x80) | 0x7F); }
-          else { writeByte(noteOff, (noteRaw & 0x80) | (v & 0x7F)); }
+          if (v >= 128) { writeByte(noteOff, (noteRaw & NOTE_CONDITION_BIT) | NOTE_UNLOCKED); }
+          else { writeByte(noteOff, (noteRaw & NOTE_CONDITION_BIT) | (v & NOTE_VALUE_MASK)); }
         },
       }));
 
@@ -1295,7 +1295,7 @@ var setStatus = AR.setStatus;
       body.appendChild(makeParamRow('VELO', veloVal, veloLocked, {
         min: 0, max: 128, rawVal: veloRawVal, initVal: veloLocked ? veloRaw : defVelo,
         displayFn: (v) => v >= 128 ? 'TRK' : v,
-        onChange: (v) => writeByte(veloOff, v >= 128 ? 0xFF : v),
+        onChange: (v) => writeByte(veloOff, v >= 128 ? PLOCK_NO_VALUE : v),
       }));
 
       // LEN: 0-127 = value (127=∞), 128 = clear (use default)
@@ -1304,7 +1304,7 @@ var setStatus = AR.setStatus;
       body.appendChild(makeParamRow('LEN', lenVal, lenLocked, {
         min: 0, max: 128, rawVal: lenRawVal, initVal: lenLocked ? lenRaw : defLen,
         displayFn: (v) => v >= 128 ? 'TRK' : noteLenStr(v),
-        onChange: (v) => writeByte(lenOff, v >= 128 ? 0xFF : v),
+        onChange: (v) => writeByte(lenOff, v >= 128 ? PLOCK_NO_VALUE : v),
       }));
 
       // PROB: trig condition (0-64 = conditions, 65 = TRK = use track probability)
@@ -1327,16 +1327,16 @@ var setStatus = AR.setStatus;
 
       // UTIME: -23..+23, stored in lower 6 bits, preserve upper bits (trig condition)
       const microRaw    = S.lastRaw[trackBase + MICRO_TIMING_OFFSET + s];
-      const microVal    = microRaw & 0x3F;
-      const microSigned = (microVal & 0x20) ? microVal - 64 : microVal;
+      const microVal    = microRaw & UTIME_VALUE_MASK;
+      const microSigned = (microVal & UTIME_SIGN_BIT) ? microVal - 64 : microVal;
       const utimeStr    = utimeFrac(microSigned);
       const utimeDispFn = (v) => utimeFrac(v);
       body.appendChild(makeParamRow('UTIME', utimeStr, microSigned !== 0, {
         min: -23, max: 23, rawVal: microSigned, displayFn: utimeDispFn, snap: 0,
         onChange: (v) => {
           // Encode signed value into 6-bit field, preserve upper 2 bits
-          const enc = v < 0 ? (v + 64) & 0x3F : v & 0x3F;
-          S.lastRaw[trackBase + MICRO_TIMING_OFFSET + s] = (microRaw & 0xC0) | enc;
+          const enc = v < 0 ? (v + 64) & UTIME_VALUE_MASK : v & UTIME_VALUE_MASK;
+          S.lastRaw[trackBase + MICRO_TIMING_OFFSET + s] = (microRaw & UTIME_UPPER_MASK) | enc;
           refreshAfterEdit();
         },
       }));
@@ -1375,8 +1375,8 @@ var setStatus = AR.setStatus;
       const trackBase = 4 + t * TRACK_V5_SZ;
       const isRetrig  = (flags & AR_TRIG_RETRIG) !== 0;
 
-      const rateRaw   = S.lastRaw[trackBase + RETRIG_RATE_OFFSET   + s] & 0x1F;
-      const lenRaw    = S.lastRaw[trackBase + RETRIG_LENGTH_OFFSET  + s] & 0x7F;
+      const rateRaw   = S.lastRaw[trackBase + RETRIG_RATE_OFFSET   + s] & RETRIG_RATE_MASK;
+      const lenRaw    = S.lastRaw[trackBase + RETRIG_LENGTH_OFFSET  + s] & RETRIG_LEN_VALUE_MASK;
       const velRaw    = S.lastRaw[trackBase + RETRIG_VELO_OFFSET    + s];
       const velSigned = velRaw > 127 ? velRaw - 256 : velRaw;
 
@@ -1394,7 +1394,7 @@ var setStatus = AR.setStatus;
         min: 0, max: 16, rawVal: rateRaw,
         displayFn: (v) => RETRIG_RATE_LABELS[v] ?? String(v),
         onChange: (v) => {
-          S.lastRaw[rateOff] = (rateFull & 0xE0) | (v & 0x1F);
+          S.lastRaw[rateOff] = (rateFull & RETRIG_RATE_FLAGS) | (v & RETRIG_RATE_MASK);
           refreshAfterEdit();
         },
       }));
@@ -1406,7 +1406,7 @@ var setStatus = AR.setStatus;
         min: 0, max: 127, rawVal: lenRaw,
         displayFn: (v) => noteLenDisplay(noteLenVal(v)),
         onChange: (v) => {
-          S.lastRaw[lenOff2] = (lenFull & 0x80) | (v & 0x7F);
+          S.lastRaw[lenOff2] = (lenFull & RETRIG_LEN_FLAG) | (v & RETRIG_LEN_VALUE_MASK);
           refreshAfterEdit();
         },
       }));
@@ -1426,7 +1426,7 @@ var setStatus = AR.setStatus;
     }
 
     // Write a plock value into S.lastRaw. Finds or allocates the plock sequence
-    // slot for the given track + param type. Deallocates if all steps become 0xFF.
+    // slot for the given track + param type. Deallocates if all steps become PLOCK_NO_VALUE.
     function writePlock(t, pt, s, val) {
       if (!S.lastRaw) return;
       const end = PLOCK_SEQS_BASE + NUM_PLOCK_SEQS * PLOCK_SEQ_SZ;
@@ -1438,46 +1438,46 @@ var setStatus = AR.setStatus;
       for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
         const base = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
         if (S.lastRaw[base] === pt && S.lastRaw[base + 1] === t) { slotBase = base; break; }
-        if (freeBase < 0 && S.lastRaw[base] === 0xFF) freeBase = base;
+        if (freeBase < 0 && S.lastRaw[base] === PLOCK_TYPE_UNUSED) freeBase = base;
       }
 
       if (slotBase >= 0) {
         // Existing slot — write the value
         S.lastRaw[slotBase + 2 + s] = val;
-        // If all steps are now 0xFF, deallocate the slot
+        // If all steps are now empty, deallocate the slot
         let allEmpty = true;
         for (let i = 0; i < AR_NUM_STEPS; i++) {
-          if (S.lastRaw[slotBase + 2 + i] !== 0xFF) { allEmpty = false; break; }
+          if (S.lastRaw[slotBase + 2 + i] !== PLOCK_NO_VALUE) { allEmpty = false; break; }
         }
-        if (allEmpty) { S.lastRaw[slotBase] = 0xFF; S.lastRaw[slotBase + 1] = 0xFF; }
-      } else if (val !== 0xFF && freeBase >= 0) {
+        if (allEmpty) { S.lastRaw[slotBase] = PLOCK_TYPE_UNUSED; S.lastRaw[slotBase + 1] = PLOCK_TYPE_UNUSED; }
+      } else if (val !== PLOCK_NO_VALUE && freeBase >= 0) {
         // Allocate new slot
         S.lastRaw[freeBase] = pt;
         S.lastRaw[freeBase + 1] = t;
-        for (let i = 0; i < AR_NUM_STEPS; i++) S.lastRaw[freeBase + 2 + i] = 0xFF;
+        for (let i = 0; i < AR_NUM_STEPS; i++) S.lastRaw[freeBase + 2 + i] = PLOCK_NO_VALUE;
         S.lastRaw[freeBase + 2 + s] = val;
       }
-      // else: no slot found and val is 0xFF — nothing to do
+      // else: no slot found and val is cleared — nothing to do
     }
 
-    // Clear the 0x80 fine companion for a coarse plock on a given step.
+    // Clear the fine companion for a coarse plock on a given step.
     // Must be called BEFORE writePlock if the coarse slot may be deallocated.
     function clearPlockFine(t, pt, s) {
       if (!S.lastRaw) return;
       for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
         const base = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
         if (S.lastRaw[base] === pt && S.lastRaw[base + 1] === t) {
-          // Found coarse slot; check if next slot is a 0x80 fine companion
+          // Found coarse slot; check if next slot is a fine companion
           const nextSi = si + 1;
           if (nextSi < NUM_PLOCK_SEQS) {
             const nb = PLOCK_SEQS_BASE + nextSi * PLOCK_SEQ_SZ;
-            if (S.lastRaw[nb] === 0x80 && S.lastRaw[nb + 1] === 0x80) {
-              S.lastRaw[nb + 2 + s] = 0xFF;
+            if (S.lastRaw[nb] === PLOCK_FINE_FLAG && S.lastRaw[nb + 1] === PLOCK_FINE_FLAG) {
+              S.lastRaw[nb + 2 + s] = PLOCK_NO_VALUE;
               let allEmpty = true;
               for (let i = 0; i < AR_NUM_STEPS; i++) {
-                if (S.lastRaw[nb + 2 + i] !== 0xFF) { allEmpty = false; break; }
+                if (S.lastRaw[nb + 2 + i] !== PLOCK_NO_VALUE) { allEmpty = false; break; }
               }
-              if (allEmpty) { S.lastRaw[nb] = 0xFF; S.lastRaw[nb + 1] = 0xFF; }
+              if (allEmpty) { S.lastRaw[nb] = PLOCK_TYPE_UNUSED; S.lastRaw[nb + 1] = PLOCK_TYPE_UNUSED; }
             }
           }
           break;
@@ -1485,7 +1485,7 @@ var setStatus = AR.setStatus;
       }
     }
 
-    // Write a fine value to the 0x80 companion of a coarse plock.
+    // Write a fine value to the fine companion of a coarse plock.
     // Creates the companion if it doesn't exist (requires adjacent free slot).
     function writePlockFine(t, pt, s, fineVal) {
       if (!S.lastRaw) return;
@@ -1499,14 +1499,14 @@ var setStatus = AR.setStatus;
         if (nextSi >= NUM_PLOCK_SEQS) return;
         const nb = PLOCK_SEQS_BASE + nextSi * PLOCK_SEQ_SZ;
 
-        if (S.lastRaw[nb] === 0x80 && S.lastRaw[nb + 1] === 0x80) {
+        if (S.lastRaw[nb] === PLOCK_FINE_FLAG && S.lastRaw[nb + 1] === PLOCK_FINE_FLAG) {
           // Companion exists — update step value
           S.lastRaw[nb + 2 + s] = fineVal;
-        } else if (S.lastRaw[nb] === 0xFF) {
+        } else if (S.lastRaw[nb] === PLOCK_TYPE_UNUSED) {
           // Next slot free — create companion
-          S.lastRaw[nb] = 0x80;
-          S.lastRaw[nb + 1] = 0x80;
-          for (let i = 0; i < AR_NUM_STEPS; i++) S.lastRaw[nb + 2 + i] = 0xFF;
+          S.lastRaw[nb] = PLOCK_FINE_FLAG;
+          S.lastRaw[nb + 1] = PLOCK_FINE_FLAG;
+          for (let i = 0; i < AR_NUM_STEPS; i++) S.lastRaw[nb + 2 + i] = PLOCK_NO_VALUE;
           S.lastRaw[nb + 2 + s] = fineVal;
         }
         // else: next slot occupied by another plock — can't create companion
@@ -1520,10 +1520,10 @@ var setStatus = AR.setStatus;
       const mulInfo = PLOCK_INFO[0x22];
       const spdArr = S.plockValues && S.plockValues[t].get(0x21);
       const mulArr = S.plockValues && S.plockValues[t].get(0x22);
-      const spdRaw = (spdArr && spdArr[s] !== 0xFF) ? spdArr[s]
+      const spdRaw = (spdArr && spdArr[s] !== PLOCK_NO_VALUE) ? spdArr[s]
         : (poolSound && spdInfo.sndOff < poolSound.length ? poolSound[spdInfo.sndOff]
         : getKitDefault(t, spdInfo.sndOff));
-      const mulRaw = (mulArr && mulArr[s] !== 0xFF) ? mulArr[s]
+      const mulRaw = (mulArr && mulArr[s] !== PLOCK_NO_VALUE) ? mulArr[s]
         : (poolSound && mulInfo.sndOff < poolSound.length ? poolSound[mulInfo.sndOff]
         : getKitDefault(t, mulInfo.sndOff));
       if (spdRaw === null || mulRaw === null) return null;
@@ -1551,9 +1551,9 @@ var setStatus = AR.setStatus;
     function fxLfoSpeedLabel(t, s) {
       const spdArr = S.plockValues && S.plockValues[t].get(29);
       const mulArr = S.plockValues && S.plockValues[t].get(30);
-      const spdRaw = (spdArr && spdArr[s] !== 0xFF) ? spdArr[s]
+      const spdRaw = (spdArr && spdArr[s] !== PLOCK_NO_VALUE) ? spdArr[s]
         : getKitFxDefault(FX_PLOCK_INFO[29].kitOff);
-      const mulRaw = (mulArr && mulArr[s] !== 0xFF) ? mulArr[s]
+      const mulRaw = (mulArr && mulArr[s] !== PLOCK_NO_VALUE) ? mulArr[s]
         : getKitFxDefault(FX_PLOCK_INFO[30].kitOff);
       if (spdRaw === null || mulRaw === null) return null;
       const spd = spdRaw - 64;
@@ -1591,8 +1591,8 @@ var setStatus = AR.setStatus;
         const lbl = info.lbl;
         const kitDef = getKitFxDefault(info.kitOff);
         const plArr  = S.plockValues && S.plockValues[t].get(pt);
-        const plVal  = plArr ? plArr[s] : 0xFF;
-        const locked = plVal !== 0xFF;
+        const plVal  = plArr ? plArr[s] : PLOCK_NO_VALUE;
+        const locked = plVal !== PLOCK_NO_VALUE;
 
         const displayVal = locked ? plVal : (kitDef !== null ? kitDef : '?');
         const plRawVal = locked ? plVal : 128;
@@ -1645,12 +1645,12 @@ var setStatus = AR.setStatus;
         let onChange;
         if (info.fxLfoDest) {
           onChange = (v) => {
-            writePlock(t, ptCapture, s, v >= pMax ? 0xFF : FX_LFO_DEST_UI_IDS[v]);
+            writePlock(t, ptCapture, s, v >= pMax ? PLOCK_NO_VALUE : FX_LFO_DEST_UI_IDS[v]);
             refreshAfterEdit();
           };
         } else {
           onChange = (v) => {
-            writePlock(t, ptCapture, s, v >= pMax ? 0xFF : v);
+            writePlock(t, ptCapture, s, v >= pMax ? PLOCK_NO_VALUE : v);
             refreshAfterEdit();
           };
         }
@@ -1668,9 +1668,9 @@ var setStatus = AR.setStatus;
             if (!sub) return;
             const spdArr = S.plockValues && S.plockValues[t].get(29);
             const mulArr = S.plockValues && S.plockValues[t].get(30);
-            let spdRaw = (spdArr && spdArr[s] !== 0xFF) ? spdArr[s]
+            let spdRaw = (spdArr && spdArr[s] !== PLOCK_NO_VALUE) ? spdArr[s]
               : getKitFxDefault(FX_PLOCK_INFO[29].kitOff);
-            let mulRaw = (mulArr && mulArr[s] !== 0xFF) ? mulArr[s]
+            let mulRaw = (mulArr && mulArr[s] !== PLOCK_NO_VALUE) ? mulArr[s]
               : getKitFxDefault(FX_PLOCK_INFO[30].kitOff);
             if (pt === 29) spdRaw = (v >= pMax) ? getKitFxDefault(FX_PLOCK_INFO[29].kitOff) : v;
             if (pt === 30) mulRaw = (v >= pMax) ? getKitFxDefault(FX_PLOCK_INFO[30].kitOff) : v;
@@ -1731,7 +1731,7 @@ var setStatus = AR.setStatus;
         // Override SRC labels with machine-specific names; skip unused params
         let lbl = info.lbl;
         if (secKey === 'SRC' && machineType !== null && machineType !== undefined
-            && pt <= 0x07) {
+            && pt <= PLOCK_SYNTH_PARAM_MAX) {
           const ml = MACHINE_PARAM_NAMES[pt][machineType];
           if (ml === '-') continue;  // param not used by this machine
           if (ml) lbl = ml;
@@ -1742,8 +1742,8 @@ var setStatus = AR.setStatus;
           ? poolSound[info.sndOff]
           : getKitDefault(t, info.sndOff);
         const plArr  = S.plockValues && S.plockValues[t].get(pt);
-        const plVal  = plArr ? plArr[s] : 0xFF;
-        const locked = plVal !== 0xFF;
+        const plVal  = plArr ? plArr[s] : PLOCK_NO_VALUE;
+        const locked = plVal !== PLOCK_NO_VALUE;
 
         const displayVal = locked ? plVal : (kitDef !== null ? kitDef : '?');
         // Editable: 0-127 = plock value, 128 = clear (use default)
@@ -1759,7 +1759,7 @@ var setStatus = AR.setStatus;
         let decimalHR = null;  // halfRange for decimal (coarse+fine) params
         let machInf127 = false;
         let isFreqParam = false;  // coarse*128+fine = Hz (HH Lab)
-        if (secKey === 'SRC' && pt <= 0x07 && machineType !== null && machineType !== undefined) {
+        if (secKey === 'SRC' && pt <= PLOCK_SYNTH_PARAM_MAX && machineType !== null && machineType !== undefined) {
           if (MACHINE_ENUMS[machineType]?.[pt]) enumArr = MACHINE_ENUMS[machineType][pt];
           if (MACHINE_BIPOLAR[machineType]?.has(pt)) isBipolar = true;
           // Decimal coarse+fine params
@@ -1842,8 +1842,8 @@ var setStatus = AR.setStatus;
         // For freq params, convert coarse*128+fine to Hz slider value
         if (isFreqParam) {
           const fineArr = S.plockFineValues && S.plockFineValues[t].get(pt);
-          const fineVal = (fineArr && locked) ? fineArr[s] : 0xFF;
-          const fine = (fineVal !== 0xFF) ? fineVal : 0;
+          const fineVal = (fineArr && locked) ? fineArr[s] : PLOCK_NO_VALUE;
+          const fine = (fineVal !== PLOCK_NO_VALUE) ? fineVal : 0;
           if (locked) {
             sliderRawVal = plVal * 128 + fine;
           } else {
@@ -1860,8 +1860,8 @@ var setStatus = AR.setStatus;
           const hr = decimalHR;
           const sliderCenter = hr * 2;  // slider midpoint
           const fineArr = S.plockFineValues && S.plockFineValues[t].get(pt);
-          const fineVal = (fineArr && locked) ? fineArr[s] : 0xFF;
-          const fine = (fineVal !== 0xFF) ? fineVal : 0;
+          const fineVal = (fineArr && locked) ? fineArr[s] : PLOCK_NO_VALUE;
+          const fine = (fineVal !== PLOCK_NO_VALUE) ? fineVal : 0;
           if (locked) {
             // Convert coarse+fine → half-step: round((coarse-64 + fine/128) / 0.50) + sliderCenter
             sliderRawVal = Math.round(((plVal - 64) + fine / 128) / 0.50) + sliderCenter;
@@ -1882,14 +1882,14 @@ var setStatus = AR.setStatus;
         let onChange;
         if (info.lfoDest) {
           onChange = (v) => {
-            writePlock(t, ptCapture, s, v >= pMax ? 0xFF : LFO_DEST_UI_IDS[v]);
+            writePlock(t, ptCapture, s, v >= pMax ? PLOCK_NO_VALUE : LFO_DEST_UI_IDS[v]);
             refreshAfterEdit();
           };
         } else if (isFreqParam) {
           onChange = (v) => {
             if (v >= 16256) {
               clearPlockFine(t, ptCapture, s);
-              writePlock(t, ptCapture, s, 0xFF);
+              writePlock(t, ptCapture, s, PLOCK_NO_VALUE);
             } else {
               const coarse = Math.min(127, Math.floor(v / 128));
               const fine   = Math.min(127, v - coarse * 128);
@@ -1911,7 +1911,7 @@ var setStatus = AR.setStatus;
             if (v >= sliderCenter * 2) {
               // TRK: clear both coarse and fine
               clearPlockFine(t, ptCapture, s);
-              writePlock(t, ptCapture, s, 0xFF);
+              writePlock(t, ptCapture, s, PLOCK_NO_VALUE);
             } else {
               // v is in half-step domain (may be float from number input).
               // Convert to coarse + fine (0-127).
@@ -1929,7 +1929,7 @@ var setStatus = AR.setStatus;
           };
         } else {
           onChange = (v) => {
-            writePlock(t, ptCapture, s, v >= pMax ? 0xFF : v);
+            writePlock(t, ptCapture, s, v >= pMax ? PLOCK_NO_VALUE : v);
             refreshAfterEdit();
           };
         }
@@ -1953,8 +1953,8 @@ var setStatus = AR.setStatus;
               ? poolSnd[off] : getKitDefault(t, off);
             const spdArr = S.plockValues && S.plockValues[t].get(0x21);
             const mulArr = S.plockValues && S.plockValues[t].get(0x22);
-            let spdRaw = (spdArr && spdArr[s] !== 0xFF) ? spdArr[s] : getSrc(spdOff);
-            let mulRaw = (mulArr && mulArr[s] !== 0xFF) ? mulArr[s] : getSrc(mulOff);
+            let spdRaw = (spdArr && spdArr[s] !== PLOCK_NO_VALUE) ? spdArr[s] : getSrc(spdOff);
+            let mulRaw = (mulArr && mulArr[s] !== PLOCK_NO_VALUE) ? mulArr[s] : getSrc(mulOff);
             // Override the param being dragged with the preview value
             if (pt === 0x21) spdRaw = (v >= pMax) ? getSrc(spdOff) : v;
             if (pt === 0x22) mulRaw = (v >= pMax) ? getSrc(mulOff) : v;
@@ -2019,8 +2019,8 @@ var setStatus = AR.setStatus;
         if (isFreqParam) {
           if (locked) {
             const fineArr = S.plockFineValues && S.plockFineValues[t].get(pt);
-            const fineVal = fineArr ? fineArr[s] : 0xFF;
-            const fine = (fineVal !== 0xFF) ? fineVal : 0;
+            const fineVal = fineArr ? fineArr[s] : PLOCK_NO_VALUE;
+            const fine = (fineVal !== PLOCK_NO_VALUE) ? fineVal : 0;
             showVal = (plVal * 128 + fine) + 'Hz';
           } else if (kitDef !== null) {
             const defFine = poolSound && info.sndOff + 1 < poolSound.length
@@ -2035,8 +2035,8 @@ var setStatus = AR.setStatus;
           const coarseMin = 64 - decimalHR;
           if (locked) {
             const fineArr = S.plockFineValues && S.plockFineValues[t].get(pt);
-            const fineVal = fineArr ? fineArr[s] : 0xFF;
-            const fine = (fineVal !== 0xFF) ? fineVal : 0;
+            const fineVal = fineArr ? fineArr[s] : PLOCK_NO_VALUE;
+            const fine = (fineVal !== PLOCK_NO_VALUE) ? fineVal : 0;
             const d = (plVal - 64) + fine / 128;
             showVal = (d >= 0 ? '+' : '') + d.toFixed(2);
           } else if (kitDef !== null) {
@@ -2294,7 +2294,7 @@ var setStatus = AR.setStatus;
       return s;
     }
     function noteLenStr(v) {
-      if (v === 0xFF) return 'DEF';
+      if (v === PLOCK_NO_VALUE) return 'DEF';
       return noteLenDisplay(noteLenVal(v));
     }
 

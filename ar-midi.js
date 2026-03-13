@@ -73,12 +73,12 @@ function onMidiMessage(ev) {
   const data = ev.data;
   for (let i = 0; i < data.length; i++) {
     const b = data[i];
-    if (b === 0xF0) {
+    if (b === SYSEX_START) {
       S.inSysex  = true;
-      S.sysexBuf = [0xF0];
+      S.sysexBuf = [SYSEX_START];
     } else if (S.inSysex) {
       S.sysexBuf.push(b);
-      if (b === 0xF7) {
+      if (b === SYSEX_END) {
         S.inSysex = false;
         handleSysex(new Uint8Array(S.sysexBuf));
         S.sysexBuf = [];
@@ -91,7 +91,7 @@ function onMidiMessage(ev) {
 
 function handleSysex(syx) {
   if (syx.length < 20) return;
-  if (syx[0] !== 0xF0)              return;
+  if (syx[0] !== SYSEX_START)        return;
   if (syx[1] !== 0x00)              return;
   if (syx[2] !== AR_ELEKTRON_MFR_1) return;
   if (syx[3] !== AR_ELEKTRON_MFR_2) return;
@@ -215,9 +215,9 @@ function requestSoundPoolSlots(slots) {
     if (S.soundPool.has(nr)) continue;
     S.pendingSoundReqs.add(nr);
     const req = new Uint8Array([
-      0xF0, 0x00, 0x20, 0x3C, 0x07,
+      SYSEX_START, 0x00, AR_ELEKTRON_MFR_1, AR_ELEKTRON_MFR_2, AR_PRODUCT_ID,
       0x00, AR_SYSEX_REQUEST_ID_SOUND, 0x01, 0x01, nr & 0x7F,
-      0x00, 0x00, 0x00, 0x05, 0xF7
+      0x00, 0x00, 0x00, 0x05, SYSEX_END
     ]);
     S.rytmOutput.send(req);
   }
@@ -257,9 +257,9 @@ AR.midi = {
         let i = 0;
         let count = 0;
         while (i < bytes.length) {
-          if (bytes[i] === 0xF0) {
+          if (bytes[i] === SYSEX_START) {
             let j = i + 1;
-            while (j < bytes.length && bytes[j] !== 0xF7) j++;
+            while (j < bytes.length && bytes[j] !== SYSEX_END) j++;
             if (j < bytes.length) {
               handleSysex(bytes.subarray(i, j + 1));
               count++;

@@ -5,6 +5,8 @@ import struct
 import sys
 
 # ── Constants ──────────────────────────────────────────────────────────────────
+# Many of these duplicate constants in ar-constants.js. When adding new offsets,
+# check ar-constants.js for the canonical JS names (SND_*, KIT_FX_*, PLOCK_*, etc.).
 AR_PATTERN_V5_SZ   = 0x332D  # 13101 bytes raw
 AR_KIT_V5_SZ       = 0x0A32  # 2610 bytes raw
 AR_SOUND_V5_SZ     = 162     # bytes raw per sound
@@ -561,27 +563,27 @@ def make_kit(track_machines):
         raw[track_base + MACHINE_TYPE_OFF] = machine_id
 
         # Set some default synth param values so they show non-zero
-        # synth_param_1 through synth_param_8 at offsets 0x1C..0x2A (s_u16_t = 2 bytes each)
+        # synth_param_1..8 at offsets 0x1C..0x2A (JS: SND_SYNTH_PARAM_1..8)
         params = [100, 64, 80, 64, 64, 64, 64, 64]
         for i, val in enumerate(params):
             raw[track_base + 0x1C + i * 2] = val
 
-        # Sample params: tune=64, fine=64, nr=0, br=0, sta=0, end=127, loop=0, lev=100
+        # Sample params (JS: SND_SAMPLE_TUNE..SND_SAMPLE_VOLUME, 0x2C..0x3A)
         sample_vals = [64, 64, 0, 0, 0, 127, 0, 100]
         for i, val in enumerate(sample_vals):
             raw[track_base + 0x2C + i * 2] = val
 
-        # Filter: atk=0, dec=64, sus=64, rel=32, frq=64, res=0, typ=0, env=64
+        # Filter params (JS: SND_FLT_ATTACK..SND_FLT_ENV, 0x3C..0x4A)
         filt_vals = [0, 64, 64, 32, 64, 0, 0, 64]
         for i, val in enumerate(filt_vals):
             raw[track_base + 0x3C + i * 2] = val
 
-        # Amp: atk=0, hld=0, dec=64, drv=0, dly=0, rev=0, pan=64, vol=100
+        # Amp params (JS: SND_AMP_ATTACK..SND_AMP_VOLUME, 0x4C..0x5A)
         amp_vals = [0, 0, 64, 0, 0, 0, 64, 100]
         for i, val in enumerate(amp_vals):
             raw[track_base + 0x4C + i * 2] = val
 
-        # LFO: spd=32, mlt=1, fad=0, dst=0, wav=0, phs=0, mod=0, dep=64
+        # LFO params (JS: SND_LFO_SPEED..SND_LFO_DEPTH, 0x5E..0x6C)
         lfo_vals = [32, 1, 0, 0, 0, 0, 0, 64]
         for i, val in enumerate(lfo_vals):
             raw[track_base + 0x5E + i * 2] = val
