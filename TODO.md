@@ -25,11 +25,14 @@ Log" button at bottom with error badge, scrollable panel with live updates.
 `AR.loadKit()`, `AR.loadPlocks()` centralise multi-property mutations.
 ~130 references updated across `ar-editor.js`, `ar-midi.js`, `ar-sysex.js`.
 
-### 5. Large functions need decomposition
-- `renderGrid()` (~350 lines): ruler, track iteration, step rendering, listeners, slide lines
-- `buildParamSection()` (~350 lines): parameter display, editing, bipolar/decimal/enum/freq
-- `renderMeta()` (~300+ lines): pattern metadata display + inline editing
-- Break each into 5-6 focused helper functions
+### 5. ~~Large functions need decomposition~~ ✅
+`renderGrid()` → 5 helpers (`buildRuler`, `buildStepCell`, `attachStepListener`,
+`drawSlideLines`, `gridStepCenterX`) + grid layout constants; body ~70 lines.
+`renderMeta()` → 8 helpers (`metaLabel`, `metaField`, `metaArrowField`, `metaArrowBtn`,
+`metaAppendArrows`, `metaStepDenom`, `buildMetaLine1`, `buildMetaLine2`) +
+sub-helpers `buildMasterLenField`, `buildMasterChgField`; body ~5 lines.
+`buildParamSection()` → 4 helpers (`buildParamDisplayConfig`, `resolveSliderState`,
+`buildParamOnChange`, `computeParamShowVal`); loop body ~60 lines.
 
 ### 6. Struct schema for pattern layout
 - Pattern data accessed via `raw[trackBase + SOME_OFFSET]` everywhere
