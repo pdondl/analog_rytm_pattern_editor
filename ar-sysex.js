@@ -1,6 +1,5 @@
 // ─── SysEx codec, trig flags, plock parsing ──────────────────────────────────
 // Depends on: ar-state.js, ar-constants.js
-var S = AR.state;
 
     function patternSlotName(n) {
       const bank = String.fromCharCode(65 + Math.floor(n / 16));
@@ -162,7 +161,7 @@ var S = AR.state;
     }
 
     // ─── Plock parsing ────────────────────────────────────────────────────────
-    // Scans plock_seqs and populates module-level `S.plockValues`.
+    // Scans plock_seqs and populates AR.state.pattern.plocks via AR.loadPlocks.
     // Returns a plockMap[track][step] presence array for use in renderGrid.
 
     function parsePlocks(raw) {
@@ -207,8 +206,7 @@ var S = AR.state;
         }
       }
 
-      S.plockValues = values;
-      S.plockFineValues = fine;
+      AR.loadPlocks(values, fine);
       return map;
     }
 

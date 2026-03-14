@@ -19,10 +19,11 @@ Kit and sound pool decode errors now report via `setStatus`. Added persistent
 log panel: `AR.setStatus` accumulates timestamped entries in `AR.log[]`, "Show
 Log" button at bottom with error badge, scrollable panel with live updates.
 
-### 4. Global mutable state
-- 19 global `let` variables are now in `AR.state` but still mutated from everywhere
-- Consider grouping related state (e.g., MIDI connection state, pattern data, UI state)
-- Make state mutations more explicit / centralized where practical
+### 4. ~~Global mutable state~~ ✅
+`AR.state` grouped into sub-objects: `midi` (5 props), `pattern` (9 props),
+`ui` (3 props), `requests` (2 props). Helper functions `AR.loadPattern()`,
+`AR.loadKit()`, `AR.loadPlocks()` centralise multi-property mutations.
+~130 references updated across `ar-editor.js`, `ar-midi.js`, `ar-sysex.js`.
 
 ### 5. Large functions need decomposition
 - `renderGrid()` (~350 lines): ruler, track iteration, step rendering, listeners, slide lines

@@ -3,25 +3,55 @@ window.AR = window.AR || {};
 
 // ─── Mutable application state ───────────────────────────────────────────────
 AR.state = {
-  midiAccess:       null,
-  rytmInput:        null,
-  rytmOutput:       null,
-  sysexBuf:         [],
-  inSysex:          false,
-  lastRaw:          null,    // decoded pattern bytes
-  lastKit:          null,    // decoded kit bytes
-  lastKitSyx:       null,    // original kit sysex bytes (for saving)
-  lastSyxMeta:      null,    // { devId, dumpId, verHi, verLo, objNr }
-  plockValues:      null,    // plockValues[track] = Map<plockType, Uint8Array[64]>
-  plockFineValues:  null,    // plockFineValues[track] = Map<plockType, Uint8Array[64]> (0x80 companions)
-  stepPage:         0,
-  openPanel:        null,    // { t, s, el }
-  openTrackPanel:   null,    // { t, el }
-  soundPool:        new Map(),      // slot (0-127) → decoded raw sound bytes
-  soundPoolSyx:     new Map(),      // slot (0-127) → original sysex bytes (for saving)
-  pendingSoundReqs: new Set(),      // slot numbers awaiting response
-  savePending:      false,          // true while waiting for full pool before saving
-  lastPatName:      '',             // pattern name for meta display
+  midi: {
+    access:    null,   // WebMIDI MIDIAccess
+    input:     null,   // MIDIInput port
+    output:    null,   // MIDIOutput port
+    sysexBuf:  [],     // accumulating incoming SysEx bytes
+    inSysex:   false,  // currently inside a SysEx message
+  },
+  pattern: {
+    raw:          null,   // Uint8Array — decoded pattern bytes (mutable during edits)
+    kit:          null,   // Uint8Array — decoded kit bytes
+    kitSyx:       null,   // Uint8Array — original kit SysEx (for round-trip save)
+    syxMeta:      null,   // { devId, dumpId, verHi, verLo, objNr }
+    name:         '',     // "Workbuffer" or "A01" etc.
+    plocks:       null,   // Array[13] of Map<type, Uint8Array[64]>
+    plockFine:    null,   // Array[13] of Map<type, Uint8Array[64]> (0x80 companions)
+    soundPool:    new Map(),  // slot (0-127) → decoded raw sound bytes
+    soundPoolSyx: new Map(),  // slot (0-127) → original SysEx bytes (for saving)
+  },
+  ui: {
+    stepPage:       0,     // 0 or 1
+    openPanel:      null,  // { t, s, el } or null
+    openTrackPanel: null,  // { t, el } or null
+  },
+  requests: {
+    pendingSounds: new Set(),  // slot numbers awaiting SysEx response
+    savePending:   false,      // true while waiting for full pool before saving
+  },
+};
+
+// ─── State mutation helpers ──────────────────────────────────────────────────
+AR.loadPattern = function(raw, meta, name) {
+  var P = AR.state.pattern;
+  P.raw     = raw;
+  P.syxMeta = meta;
+  P.name    = name;
+  P.soundPool.clear();
+  P.soundPoolSyx.clear();
+  AR.state.requests.pendingSounds.clear();
+  AR.state.requests.savePending = false;
+};
+
+AR.loadKit = function(kit, syx) {
+  AR.state.pattern.kit    = kit;
+  AR.state.pattern.kitSyx = syx;
+};
+
+AR.loadPlocks = function(coarse, fine) {
+  AR.state.pattern.plocks    = coarse;
+  AR.state.pattern.plockFine = fine;
 };
 
 // ─── UI element references (populated by AR.initUI after DOM ready) ──────────
