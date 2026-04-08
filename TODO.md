@@ -56,10 +56,6 @@ combining formulas, adjacency invariant). `writePlock` now defensively deallocat
 any fine companion when its coarse slot is freed. `parsePlocks` warns on orphaned
 fine slots. All plock read/write functions have explanatory comments.
 
-### 10. Full grid re-render on every edit
-- `refreshAfterEdit()` re-renders all 832 cells + metadata + panels for any change
-- Consider incremental update: only re-render affected step/track/panel
-
 ### 11. ~~Duplicate editable-field UI patterns~~ ✅
 Extracted `attachClickToEdit(el, displayText, editVal, opts)` helper shared by
 `addVal` (track settings), `metaField` (pattern metadata), `buildMasterLenField`,
@@ -106,18 +102,20 @@ retrig length (0–127), and retrig velocity (−128–+127).
 - If project BPM mode: show project BPM as read-only with "(PRJ)" indicator
 - If pattern BPM mode: show pattern BPM as editable (current behaviour)
 
-### 18. Audio preview engine (browser-based playback)
-- Synthesize simple drum voices (Web Audio), play pattern in real-time
-- Full sequencer: trigs, conditions, micro-timing, swing, retrig, velocity, accent
-- Single tick grid: 1920 ticks/whole note (480 PPQN), shared by utime + retrig
-- UI indicators for which params are "live" vs display-only
-- See `NOTES-audio-preview.md` for full design notes and implementation plan
+### 18. ~~Audio preview engine (browser-based playback)~~ ✅
+Sequencer + 909-flavour voices shipped: tick-based lookahead scheduler on a
+2880 PPQN grid, all 13 tracks, sound-lock aware machine dispatch, AMP
+volume/pan, accent, micro-timing, swing, retrig (incl. ∞), all 57 trig
+conditions, FILL mode, advanced scale mode (per-track length+speed,
+master-length restart), per-track playheads. Coverage panel in the editor
+documents what is and isn't audible. See `NOTES-audio-preview.md` for the
+full design notes plus the up-to-date Done / Open breakdown.
 
 ### 19. Request sound pool for sound lock awareness
-- Currently sound locks show the pool slot number but we don't fetch pool sounds
-- Without pool data we can't tell if a sound lock's machine is compatible with the track
-- Request the full sound pool (128 sounds) so we can:
-  - Show the machine name for each sound lock
+- Pool entries are *consumed* when present (machine type, AMP vol/pan, step
+  panel display) but we don't actively *request* the pool over SysEx
+- Still TODO: send the sound-pool request, then:
+  - Show the machine name for each sound lock in the grid
   - Warn when a sound lock's machine doesn't match the track
   - Use correct pool sound defaults when displaying plock values for locked steps
 
