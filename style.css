@@ -439,6 +439,15 @@ button:disabled { opacity: 0.35; cursor: default; }
 .steps-outer {
   position: relative;
 }
+/* Master-length boundary line in advanced mode (one per row, stacked) */
+.master-len-marker {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 1px;
+  background: rgba(255, 220, 100, 0.55);
+  pointer-events: none;
+}
 /* Slide connector line drawn below the step boxes */
 .slide-line {
   position: absolute;

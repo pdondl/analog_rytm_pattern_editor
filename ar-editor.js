@@ -423,6 +423,26 @@ var setStatus = AR.setStatus;
         drawSlideLines(stepsOuter, slideSteps, activeSteps);
         row.appendChild(stepsOuter);
         U.gridEl.appendChild(row);
+
+        // Advanced-mode master-length boundary marker.  Drawn per row so each
+        // marker stacks vertically into one continuous line across the grid.
+        // Only meaningful when the master length is shorter than the visible
+        // 64 steps.
+        if (gridScaleMode && gridMasterSteps < 64) {
+          const boundaryPageIdx = gridMasterSteps - 1 - stepOffset;
+          if (boundaryPageIdx >= 0 && boundaryPageIdx < 32) {
+            const cells = stepsWrap.querySelectorAll('.step');
+            const cell = cells[boundaryPageIdx];
+            if (cell) {
+              const cr = cell.getBoundingClientRect();
+              const or = stepsOuter.getBoundingClientRect();
+              const marker = document.createElement('div');
+              marker.className = 'master-len-marker';
+              marker.style.left = ((cr.right - or.left) + 1) + 'px';
+              stepsOuter.appendChild(marker);
+            }
+          }
+        }
       }
     }
 
