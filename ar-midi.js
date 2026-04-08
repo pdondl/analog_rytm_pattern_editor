@@ -354,6 +354,23 @@ function sendPatternToAR() {
 // ─── Init: wire up event listeners ───────────────────────────────────────
 
 AR.midiInit = function() {
+  // Browser compatibility check — Web MIDI is Chromium-only (Chrome, Edge,
+  // Brave, Opera, Arc). Firefox and Safari have no Web MIDI at all.
+  if (!navigator.requestMIDIAccess) {
+    const warn = document.getElementById('browser-warn');
+    if (warn) {
+      warn.innerHTML =
+        '<b>This browser does not support Web MIDI.</b> ' +
+        'You can still load and edit <code>.syx</code> files, but talking to ' +
+        'an Analog Rytm requires a Chromium-based browser ' +
+        '(Chrome, Edge, Brave, Opera, or Arc).';
+      warn.hidden = false;
+    }
+    U.btnConnect.disabled = true;
+    U.btnConnect.title = 'Web MIDI not supported in this browser';
+    setStatus('Web MIDI not supported — load a .syx file to edit offline');
+  }
+
   U.btnConnect.addEventListener('click', (e) => { e.stopPropagation(); onConnectClick(); });
   U.btnRefresh.addEventListener('click', requestPattern);
   U.btnNew.addEventListener('click', () => {
