@@ -93,7 +93,7 @@ function updateConnectUI(name) {
     U.btnConnectLabel.textContent = 'MIDI: ' + name;
     U.btnConnect.classList.add('connected');
   } else {
-    U.btnConnectLabel.textContent = 'Connect MIDI';
+    U.btnConnectLabel.textContent = 'Connect';
     U.btnConnect.classList.remove('connected');
   }
 }
@@ -304,7 +304,6 @@ function handleSysex(syx) {
   AR.loadPattern(raw, meta, patName);
   renderMeta();
   U.btnSaveSyx.disabled = false;
-  U.btnClear.disabled   = false;
   updateSendBtn();
   parsePlocks(raw);
   renderGrid(raw, S.ui.stepPage);
@@ -454,13 +453,6 @@ AR.midiInit = function() {
       }
     }
     doSaveBundle();
-  });
-
-  U.btnClear.addEventListener('click', () => {
-    if (!S.pattern.raw) return;
-    if (confirm('Clear all trigs and parameter locks from this pattern?\n\n(Defaults, BPM, swing, kit, and length are preserved.)')) {
-      AR.clearPattern();
-    }
   });
 
   U.btnSend.addEventListener('click', sendPatternToAR);

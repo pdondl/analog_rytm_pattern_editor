@@ -1112,7 +1112,6 @@ var setStatus = AR.setStatus;
       renderMeta();
       renderGrid(raw, 0);
       if (U.btnSaveSyx) U.btnSaveSyx.disabled = false;
-      if (U.btnClear)   U.btnClear.disabled   = false;
     };
 
     // Default machine id per track (indices into MACHINES enum, matches
