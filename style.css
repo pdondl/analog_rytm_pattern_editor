@@ -338,7 +338,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 }
 .track-settings-panel .ts-group {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   align-items: center;
 }
 .track-settings-panel .ts-lbl {
