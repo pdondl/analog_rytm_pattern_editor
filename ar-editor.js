@@ -1967,7 +1967,12 @@ var setStatus = AR.setStatus;
         const showInput = typeof displayVal === 'number'
           ? (info.fxLfoDest ? (FX_LFO_DEST_ID_TO_UI.get(displayVal) ?? 0) : displayVal)
           : displayVal;
-        const showVal = typeof showInput === 'number' ? displayFn(showInput) : showInput;
+        let showVal = typeof showInput === 'number' ? displayFn(showInput) : showInput;
+        // When not locked, show actual kit default instead of "TRK"
+        if (!locked && showVal === 'TRK' && kitDef !== null) {
+          const clamped = Math.max(pMin, Math.min(showInput, pMax - 1));
+          showVal = displayFn(clamped);
+        }
 
         body.appendChild(makeParamRow(lbl, showVal, locked, opts));
       }
@@ -2187,7 +2192,15 @@ var setStatus = AR.setStatus;
       const showInput = typeof displayVal === 'number'
         ? (info.lfoDest ? fwLfoDestToUi(displayVal) : displayVal)
         : displayVal;
-      return typeof showInput === 'number' ? displayFn(showInput) : showInput;
+      if (typeof showInput !== 'number') return showInput;
+      const txt = displayFn(showInput);
+      // When not locked, show the actual kit default instead of "TRK"
+      // (value may exceed enum range in synthetic default kits — clamp to valid)
+      if (!locked && txt === 'TRK' && kitDef !== null) {
+        const clamped = Math.max(cfg.pMin, Math.min(showInput, cfg.pMax - 1));
+        return displayFn(clamped);
+      }
+      return txt;
     }
 
     // ─── SRC / SMPL / FLTR / AMP / LFO sections ────────────────────────────────
