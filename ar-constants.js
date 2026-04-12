@@ -506,7 +506,8 @@
       '\u00B764','\u00B7128','\u00B7256','\u00B7512','\u00B71k','\u00B72k',
     ];
 
-    // LFO destination names indexed by internal dest ID (0-41)
+    // LFO destination names indexed by internal dest ID
+    // From libanalogrytm/sound.h: AR_SOUND_LFO_DEST_xxx constants
     const LFO_DEST_NAMES = [];
     LFO_DEST_NAMES[0]  = 'P1'; LFO_DEST_NAMES[1]  = 'P2'; LFO_DEST_NAMES[2]  = 'P3';
     LFO_DEST_NAMES[3]  = 'P4'; LFO_DEST_NAMES[4]  = 'P5'; LFO_DEST_NAMES[5]  = 'P6';
@@ -559,16 +560,31 @@
       return FX_LFO_DEST_NAMES[v] ?? String(v);
     }
 
-    // Valid LFO destinations in hardware UI order (from ar_sound_lfo_dest_ids_ui)
+    // Valid LFO destinations in hardware UI order
     const LFO_DEST_UI_IDS = [
       41, 0, 1, 2, 3, 4, 5, 6, 7,        // OFF, P1-P8
       8, 9, 10, 11, 12, 13, 14, 15,       // SMP params
       23, 16, 18, 17, 19, 20, 21,          // FLT params (ENV, ATK, DEC, SUS, REL, FRQ, RES)
       24, 25, 26, 27, 31, 30, 32, 28, 29  // AMP params (ATK, HLD, DEC, OVR, VOL, PAN, ACC, DLY, REV)
     ];
-    // Reverse map: internal ID → UI index
+    // Reverse map: internal ID → UI index (used only by lfoDestName display)
     const LFO_DEST_ID_TO_UI = new Map();
     LFO_DEST_UI_IDS.forEach((id, idx) => LFO_DEST_ID_TO_UI.set(id, idx));
+
+    // Firmware LFO dest byte encoding:
+    //   0 or 41 = OFF/NONE
+    //   ≥9      = UI position + 8  (i.e. SYN_1 at UI pos 1 → byte 9)
+    // libanalogrytm uses a different internal numbering (SYN_1=0, OFF=41).
+    // These helpers convert between firmware bytes and 0-based UI positions.
+    function fwLfoDestToUi(fw) {
+      if (fw === 0 || fw === 41) return 0; // OFF
+      if (fw >= 9 && fw <= 40) return fw - 8;
+      return 0; // unknown → OFF
+    }
+    function uiToFwLfoDest(ui) {
+      if (ui === 0) return 0; // OFF
+      return ui + 8;
+    }
 
     function lfoDestName(v, machineType) {
       // For SYN destinations (0-7), use machine-specific param names

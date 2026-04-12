@@ -1478,24 +1478,40 @@ var setStatus = AR.setStatus;
         refreshAfterEdit();
       };
 
-      // SND: 0-127 = pool slot, display as slot+1; clear = no lock (TRK)
+      // SND: only valid (non-empty) pool sounds + TRK (no lock)
       const sndOff = trackBase + SOUND_LOCK_OFFSET + s;
-      const sndRawVal = hasSnd ? sndLock : 128;
-      const sndDispFn = (v) => {
-        if (v >= 128) return 'TRK';
-        let d = String(v + 1);
-        if (S.pattern.soundPool.has(v)) {
-          const ps = S.pattern.soundPool.get(v);
-          if (ps.length > MACHINE_TYPE_OFFSET) {
-            const mt = ps[MACHINE_TYPE_OFFSET];
-            if (mt < MACHINES.length) d += ' ' + MACHINES[mt].name;
+      // Build list of valid pool slots (machType != 0xFF)
+      const validSlots = []; // each entry = pool slot index (0-127)
+      for (let i = 0; i < 128; i++) {
+        if (S.pattern.soundPool.has(i)) {
+          const ps = S.pattern.soundPool.get(i);
+          if (ps.length > MACHINE_TYPE_OFFSET && ps[MACHINE_TYPE_OFFSET] !== 0xFF) {
+            validSlots.push(i);
           }
+        }
+      }
+      // Slider positions: 0..validSlots.length-1 = pool sounds, validSlots.length = TRK
+      const sndMax = validSlots.length; // TRK position
+      const sndCurIdx = hasSnd ? validSlots.indexOf(sndLock) : sndMax;
+      const sndRawVal = sndCurIdx >= 0 ? sndCurIdx : sndMax; // fallback to TRK if not found
+      const sndDispFn = (v) => {
+        if (v >= sndMax) return 'TRK';
+        const slot = validSlots[v];
+        let d = String(slot + 1);
+        const ps = S.pattern.soundPool.get(slot);
+        if (ps && ps.length > MACHINE_TYPE_OFFSET) {
+          const mt = ps[MACHINE_TYPE_OFFSET];
+          if (mt < MACHINES.length) d += ' ' + MACHINES[mt].name;
+          // Show sound name if available
+          const nameBytes = ps.slice(0x0C, 0x1B);
+          const name = String.fromCharCode(...nameBytes).replace(/\0/g, '').trim();
+          if (name) d += ' "' + name + '"';
         }
         return d;
       };
       body.appendChild(makeParamRow('SND', sndDisplay, hasSnd, {
-        min: 0, max: 128, rawVal: sndRawVal, displayFn: sndDispFn,
-        onChange: (v) => writeByte(sndOff, v >= 128 ? SOUND_LOCK_NONE : v),
+        min: 0, max: sndMax, rawVal: sndRawVal, displayFn: sndDispFn,
+        onChange: (v) => writeByte(sndOff, v >= sndMax ? SOUND_LOCK_NONE : validSlots[v]),
       }));
 
       // NOTE: edit the 7-bit note value, preserve bit 7 (trig condition flag)
@@ -2031,8 +2047,8 @@ var setStatus = AR.setStatus;
       let sliderInitVal = plInitVal;
 
       if (info.lfoDest) {
-        sliderRawVal  = plRawVal >= 128  ? cfg.pMax : (LFO_DEST_ID_TO_UI.get(plRawVal) ?? 0);
-        sliderInitVal = plInitVal >= 128 ? 0        : (LFO_DEST_ID_TO_UI.get(plInitVal) ?? 0);
+        sliderRawVal  = plRawVal >= 128  ? cfg.pMax : fwLfoDestToUi(plRawVal);
+        sliderInitVal = plInitVal >= 128 ? 0        : fwLfoDestToUi(plInitVal);
       }
 
       if (cfg.isFreqParam) {
@@ -2080,7 +2096,7 @@ var setStatus = AR.setStatus;
 
       if (info.lfoDest) {
         return (v) => {
-          writePlock(t, pt, s, v >= pMax ? PLOCK_NO_VALUE : LFO_DEST_UI_IDS[v]);
+          writePlock(t, pt, s, v >= pMax ? PLOCK_NO_VALUE : uiToFwLfoDest(v));
           refreshAfterEdit();
         };
       }
@@ -2162,7 +2178,7 @@ var setStatus = AR.setStatus;
       }
 
       const showInput = typeof displayVal === 'number'
-        ? (info.lfoDest ? (LFO_DEST_ID_TO_UI.get(displayVal) ?? 0) : displayVal)
+        ? (info.lfoDest ? fwLfoDestToUi(displayVal) : displayVal)
         : displayVal;
       return typeof showInput === 'number' ? displayFn(showInput) : showInput;
     }
