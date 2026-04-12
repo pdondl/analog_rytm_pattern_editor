@@ -765,6 +765,13 @@ var setStatus = AR.setStatus;
       }
       panel.appendChild(flagGrp);
 
+      // Close button (at end, pushed right by margin-left:auto)
+      const closeBtn = document.createElement('span');
+      closeBtn.className = 'ts-close';
+      closeBtn.textContent = '×';
+      closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeTrackPanel(); });
+      panel.appendChild(closeBtn);
+
       return panel;
     }
 
