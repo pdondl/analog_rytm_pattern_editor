@@ -306,21 +306,29 @@ button:disabled { opacity: 0.35; cursor: default; }
    heard in the preview — muted, or another track is soloed. */
 .track-row.track-dim .steps-outer { opacity: 0.35; }
 .track-row.panel-target {
-  outline: 1px solid #2a4a6a;
-  outline-offset: 2px;
-  border-radius: 2px;
+  background: #131a20;
+  border: 1px solid #2a4a6a;
+  border-radius: 0 0 2px 2px;
+  padding: 4px 6px;
+  margin-top: -1px;
 }
 .track-settings-panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 3px;
+  background: #131a20;
+  border: 1px solid #2a4a6a;
+  border-bottom: none;
+  border-radius: 2px 2px 0 0;
   padding: 8px 12px;
-  margin-bottom: 6px;
+  margin-bottom: 0;
   font-size: 0.8em;
   display: flex;
   gap: 16px;
   align-items: center;
   flex-wrap: wrap;
+}
+/* When step panel is above, track settings loses top rounding and gets a divider */
+.step-panel + .track-settings-panel {
+  border-radius: 0;
+  border-top: 1px solid #2a4a6a;
 }
 .track-settings-panel .ts-title {
   color: var(--accent);
@@ -547,9 +555,10 @@ button:disabled { opacity: 0.35; cursor: default; }
   gap: 6px;
   background: #131a20;
   border: 1px solid #2a4a6a;
-  border-radius: 2px;
+  border-bottom: none;
+  border-radius: 2px 2px 0 0;
   padding: 8px 10px;
-  margin-bottom: 6px;
+  margin-bottom: 0;
   white-space: normal;
 }
 
@@ -557,8 +566,9 @@ button:disabled { opacity: 0.35; cursor: default; }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.72em;
-  color: var(--muted);
+  font-size: 0.8em;
+  color: var(--accent);
+  font-weight: bold;
   letter-spacing: 1px;
   padding-bottom: 4px;
   border-bottom: 1px solid #1e2e3a;

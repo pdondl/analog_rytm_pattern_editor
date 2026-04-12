@@ -390,10 +390,13 @@ var setStatus = AR.setStatus;
             e.stopPropagation();
             if (S.ui.mutedTracks.has(t)) {
               S.ui.mutedTracks.delete(t);
-              if (S.ui.trackLevels[t] === 0) { S.ui.trackLevels[t] = 100; AR.saveTrackLevels(); }
+              S.ui.trackLevels[t] = S.ui.preMuteLevels[t] || 100;
+              AR.saveTrackLevels();
             } else {
+              S.ui.preMuteLevels[t] = S.ui.trackLevels[t] || 100;
               S.ui.mutedTracks.add(t);
-              S.ui.trackLevels[t] = 0; AR.saveTrackLevels();
+              S.ui.trackLevels[t] = 0;
+              AR.saveTrackLevels();
             }
             refreshAfterEdit();
           });
@@ -424,16 +427,20 @@ var setStatus = AR.setStatus;
             if (isNaN(v)) v = 100;
             v = Math.max(0, Math.min(100, v));
             lvlInp.value = v;
+            if (v === 0) {
+              S.ui.preMuteLevels[t] = S.ui.trackLevels[t] || 100;
+              S.ui.mutedTracks.add(t);
+            } else {
+              S.ui.mutedTracks.delete(t);
+            }
             S.ui.trackLevels[t] = v;
-            if (v === 0) S.ui.mutedTracks.add(t);
-            else          S.ui.mutedTracks.delete(t);
             AR.saveTrackLevels();
             refreshAfterEdit();
           });
 
+          ms.appendChild(lvlInp);
           ms.appendChild(muteBtn);
           ms.appendChild(soloBtn);
-          ms.appendChild(lvlInp);
           label.appendChild(ms);
         }
 
@@ -522,10 +529,12 @@ var setStatus = AR.setStatus;
       if (!trackRow) return;
 
       const panel = buildStepPanel(t, s);
-      U.gridEl.insertBefore(panel, trackRow);
+      // Step panel goes above everything: before track-settings if present, else before track row
+      const trackPanel = (S.ui.openTrackPanel && S.ui.openTrackPanel.t === t) ? S.ui.openTrackPanel.el : null;
+      U.gridEl.insertBefore(panel, trackPanel || trackRow);
       S.ui.openPanel = { t, s, el: panel };
 
-      // Highlight the inspected step cell and the whole track row
+      // Highlight the inspected step cell
       const stepEl = trackRow.querySelector(`.step[data-step="${s}"]`);
       if (stepEl) stepEl.classList.add('inspected');
       trackRow.classList.add('panel-target');
@@ -537,7 +546,8 @@ var setStatus = AR.setStatus;
       if (trackRow) {
         const stepEl = trackRow.querySelector(`.step[data-step="${S.ui.openPanel.s}"]`);
         if (stepEl) stepEl.classList.remove('inspected');
-        trackRow.classList.remove('panel-target');
+        if (!S.ui.openTrackPanel || S.ui.openTrackPanel.t !== S.ui.openPanel.t)
+          trackRow.classList.remove('panel-target');
       }
       S.ui.openPanel.el.remove();
       S.ui.openPanel = null;
@@ -550,6 +560,7 @@ var setStatus = AR.setStatus;
       const trackRow = U.gridEl.querySelector(`.track-row[data-track="${t}"]`);
       if (!trackRow) return;
       const panel = buildTrackSettingsPanel(t);
+      // Track settings go directly before the track row (below step panel if present)
       U.gridEl.insertBefore(panel, trackRow);
       S.ui.openTrackPanel = { t, el: panel };
       trackRow.classList.add('panel-target');
@@ -558,7 +569,10 @@ var setStatus = AR.setStatus;
     function closeTrackPanel() {
       if (!S.ui.openTrackPanel) return;
       const trackRow = U.gridEl.querySelector(`.track-row[data-track="${S.ui.openTrackPanel.t}"]`);
-      if (trackRow) trackRow.classList.remove('panel-target');
+      if (trackRow) {
+        if (!S.ui.openPanel || S.ui.openPanel.t !== S.ui.openTrackPanel.t)
+          trackRow.classList.remove('panel-target');
+      }
       S.ui.openTrackPanel.el.remove();
       S.ui.openTrackPanel = null;
     }
@@ -1119,30 +1133,40 @@ var setStatus = AR.setStatus;
       const PATTERN_SIZE = 13101;
       const raw = new Uint8Array(PATTERN_SIZE);  // zero-initialised
 
+      // Pattern format version (byte 3) — must be 0x05 for the AR to accept it
+      raw[3] = 0x05;
+
       for (let t = 0; t < AR_NUM_TRACKS; t++) {
         const base = 4 + t * AR_TRACK_V5_SZ;
-        // Per-step arrays → 0xFF sentinel for "no lock / no condition"
+        // Per-step arrays
         for (let s = 0; s < AR_NUM_STEPS; s++) {
           raw[base + NOTE_OFFSET          + s] = NOTE_CONDITION_BIT | NOTE_UNLOCKED;
           raw[base + VELOCITY_OFFSET      + s] = PLOCK_NO_VALUE;
           raw[base + NOTE_LEN_OFFSET      + s] = PLOCK_NO_VALUE;
-          raw[base + RETRIG_LENGTH_OFFSET + s] = PLOCK_NO_VALUE;
-          raw[base + RETRIG_RATE_OFFSET   + s] = PLOCK_NO_VALUE;
-          raw[base + RETRIG_VELO_OFFSET   + s] = PLOCK_NO_VALUE;
+          raw[base + MICRO_TIMING_OFFSET  + s] = 0xC0;    // default µT (upper condition bits)
+          raw[base + RETRIG_LENGTH_OFFSET + s] = 0xAE;    // default retrig length
+          raw[base + RETRIG_RATE_OFFSET   + s] = 0xE9;    // default retrig rate
+          raw[base + RETRIG_VELO_OFFSET   + s] = 0x00;    // no velocity offset
           raw[base + SOUND_LOCK_OFFSET    + s] = SOUND_LOCK_NONE;
         }
-        // Track defaults: C3 / velocity 100 / 1/16 note / no flags / 16 steps / 1× / 100%
+        // Track defaults: C3 / velocity 100 / note len 14 / 16 steps / 1× / 100%
         raw[base + DEFAULT_NOTE_OFFSET]        = 60;
         raw[base + DEFAULT_VELOCITY_OFFSET]    = 100;
-        raw[base + DEFAULT_NOTE_LEN_OFFSET]    = 12;
-        // Default flags: ENABLE | SYN_PL_SW | SMP_PL_SW so new trigs make sound.
-        // Without SYN/SMP retrigger the hit would be silent (lock-trig-ish).
-        const defFlags = AR_TRIG_ENABLE | AR_TRIG_SYN_PL_SW | AR_TRIG_SMP_PL_SW;
+        raw[base + DEFAULT_NOTE_LEN_OFFSET]    = 14;
+        // Default flags: SYN_PL_SW | SMP_PL_SW | ENV_PL_SW (no ENABLE — that's per-step)
+        const defFlags = AR_TRIG_SYN_PL_SW | AR_TRIG_SMP_PL_SW | AR_TRIG_ENV_PL_SW;
         raw[base + DEFAULT_TRIG_FLAGS_OFFSET]     = (defFlags >> 8) & 0xFF;
         raw[base + DEFAULT_TRIG_FLAGS_OFFSET + 1] =  defFlags       & 0xFF;
         raw[base + NUM_STEPS_OFFSET]           = 16;
         raw[base + TRACK_SPEED_OFFSET]         = 2;        // 1× speed
         raw[base + TRIG_PROBABILITY_OFFSET]    = 100;
+
+        // Trailing track bytes (unknown fields — match AR defaults)
+        raw[base + 0x27C] = 0x3F;
+        raw[base + 0x27D] = 0x3F;
+        raw[base + 0x27E] = 0x3F;
+        raw[base + 0x27F] = 0xFF;
+        raw[base + 0x280] = 0x60;
 
         // Pre-seed the SWING flag on even-numbered steps (2, 4, 6 … in the
         // 1-based display = odd 0-indexed positions).  This way any trig
@@ -1153,12 +1177,12 @@ var setStatus = AR.setStatus;
           setTrigFlags(trigBits, s, AR_TRIG_SWING);
         }
       }
-      // Plock slots: all unused
+      // Plock slots: type bytes = unused, step data = 0x00
       for (let si = 0; si < NUM_PLOCK_SEQS; si++) {
         const b = PLOCK_SEQS_BASE + si * PLOCK_SEQ_SZ;
         raw[b]     = PLOCK_TYPE_UNUSED;
         raw[b + 1] = PLOCK_TYPE_UNUSED;
-        for (let s = 0; s < AR_NUM_STEPS; s++) raw[b + 2 + s] = PLOCK_NO_VALUE;
+        // step data stays 0x00 (from zero-initialisation)
       }
       // Pattern meta
       writeU16BE(raw, MASTER_LENGTH_OFFSET, 16);   // 16 steps = 1 bar
@@ -1168,10 +1192,11 @@ var setStatus = AR.setStatus;
       raw[SCALE_MODE_OFFSET]   = 0;                // normal scale mode
       raw[MASTER_SPEED_OFFSET] = 2;                // 1×
       writeU16BE(raw, BPM_MSB_OFFSET, 120 * 120);  // BPM 120.0
+      raw[0x332C] = 0x01;                          // unknown meta field (matches AR)
 
       const meta = {
         devId: 0, dumpId: AR_SYSEX_DUMPX_ID_PATTERN,
-        verHi: 0, verLo: 0, objNr: 0,
+        verHi: 1, verLo: 1, objNr: 0,
       };
       AR.loadPattern(raw, meta, 'New');
 
@@ -1183,6 +1208,7 @@ var setStatus = AR.setStatus;
       renderMeta();
       renderGrid(raw, 0);
       if (U.btnSaveSyx) U.btnSaveSyx.disabled = false;
+      if (typeof updateSendBtn === 'function') updateSendBtn();
     };
 
     // Default machine id per track (indices into MACHINES enum, matches
@@ -1290,8 +1316,10 @@ var setStatus = AR.setStatus;
       const hadTrack = S.ui.openTrackPanel ? { t: S.ui.openTrackPanel.t } : null;
       renderMeta();
       renderGrid(S.pattern.raw, S.ui.stepPage);
-      if (had) openStepPanel(had.t, had.s);
+      // Re-open panels: track settings first (directly above track row),
+      // then step panel (above track settings).
       if (hadTrack) openTrackSettingsPanel(hadTrack.t);
+      if (had) openStepPanel(had.t, had.s);
     }
 
     // Map from PL_SW bit → corresponding PL_EN bit

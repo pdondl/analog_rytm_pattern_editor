@@ -768,22 +768,32 @@
       p.pan.value = sndPan;
       g.connect(p).connect(E.master);
 
-      // Choke: fade out all previously active voices in this choke group.
-      // Tracks are processed in ascending order (0→11), so the right
-      // (higher-numbered) track naturally wins on simultaneous trigs,
-      // matching the AR's priority (CP>RS, HT>MT, OH>CH, CB>CY).
+      // Choke: compare actual play times (including micro-timing) to decide
+      // who chokes whom.
+      //  - Simultaneous (within 1ms): right track wins (we process later → choke them)
+      //  - We sound after them: choke them at our play time
+      //  - They sound after us: they choke us at their play time
       if (chokeGroup) {
         const active = E.chokeActive[chokeGroup] || [];
+        const chokeFade = (param, at) => {
+          try {
+            param.cancelScheduledValues(at);
+            param.setValueAtTime(param.value, at);
+            param.exponentialRampToValueAtTime(0.0001, at + 0.006);
+          } catch (e) {}
+        };
         for (let i = active.length - 1; i >= 0; i--) {
           const prev = active[i];
-          try {
-            prev.cancelScheduledValues(atWhen);
-            prev.setValueAtTime(prev.value, atWhen);
-            prev.exponentialRampToValueAtTime(0.0001, atWhen + 0.006);
-          } catch (e) {}
+          if (prev.startTime <= atWhen + 0.001) {
+            // They started before us (or simultaneous) → we choke them
+            chokeFade(prev.param, atWhen);
+            active.splice(i, 1);
+          } else {
+            // They start after us → they choke us
+            chokeFade(g.gain, prev.startTime);
+          }
         }
-        active.length = 0;
-        active.push(g.gain);
+        active.push({ param: g.gain, startTime: atWhen });
         E.chokeActive[chokeGroup] = active;
       }
 
@@ -802,7 +812,7 @@
         if (chokeGroup) {
           const arr = E.chokeActive[chokeGroup];
           if (arr) {
-            const idx = arr.indexOf(g.gain);
+            const idx = arr.findIndex(e => e.param === g.gain);
             if (idx !== -1) arr.splice(idx, 1);
           }
         }

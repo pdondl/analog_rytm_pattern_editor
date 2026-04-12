@@ -28,6 +28,7 @@ AR.state = {
     mutedTracks:    new Set(),  // session-only preview mutes (Set<int>)
     soloedTracks:   new Set(),  // session-only preview solos (Set<int>)
     trackLevels:    new Array(12).fill(100),  // 0-100 per-track preview level
+    preMuteLevels:  new Array(12).fill(100),  // level before mute, for restore
   },
   requests: {
     pendingSounds: new Set(),  // slot numbers awaiting SysEx response
