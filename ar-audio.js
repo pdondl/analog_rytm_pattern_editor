@@ -58,6 +58,37 @@
   // Track index → drum role.  13th track (FX) has no voice.
   const VOICE_ROLES = ['BD','SD','RS','CP','BT','LT','MT','HT','CH','OH','CY','CB'];
 
+  // ─── Choke groups ──────────────────────────────────────────────────────
+  // On the Analog Rytm, CH and OH share a voice: a closed hat chokes any
+  // ringing open hat.  We model this by assigning machine IDs to choke
+  // groups.  When a voice in a group fires, all previously active voices
+  // in the same group are rapidly faded out.
+  const CHOKE_RSCP = 1;  // rimshot / clap
+  const CHOKE_MTHT = 2;  // mid tom / hi tom
+  const CHOKE_HH   = 3;  // closed hat / open hat
+  const CHOKE_CYCB = 4;  // cymbal / cowbell
+  const MACHINE_CHOKE = {
+    // RS / CP
+    4:  CHOKE_RSCP,  // RS_HARD
+    5:  CHOKE_RSCP,  // RS_CLASSIC
+    6:  CHOKE_RSCP,  // CP_CLASSIC
+    // MT / HT  (XT_CLASSIC on tracks 6/7)
+    8:  CHOKE_MTHT,  // XT_CLASSIC (shared tom voice)
+    // CH / OH
+    9:  CHOKE_HH,    // CH_CLASSIC
+    17: CHOKE_HH,    // CH_METALLIC
+    24: CHOKE_HH,    // HH_BASIC
+    33: CHOKE_HH,    // HH_LAB
+    10: CHOKE_HH,    // OH_CLASSIC
+    18: CHOKE_HH,    // OH_METALLIC
+    // CY / CB
+    11: CHOKE_CYCB,  // CY_CLASSIC
+    19: CHOKE_CYCB,  // CY_METALLIC
+    25: CHOKE_CYCB,  // CY_RIDE
+    12: CHOKE_CYCB,  // CB_CLASSIC
+    20: CHOKE_CYCB,  // CB_METALLIC
+  };
+
   // ─── Engine state ───────────────────────────────────────────────────────
   const E = {
     ctx:           null,
@@ -83,6 +114,9 @@
     highlightTrack: 0,
     highlightStep:  -1,
     rafId:          null,
+
+    // Choke groups: group id → array of { gain, when } for active voices
+    chokeActive:    {},
   };
 
   // ─── Pattern reading helpers ────────────────────────────────────────────
@@ -308,9 +342,9 @@
     osc.frequency.setValueAtTime(200 * pr, when);
     osc.frequency.exponentialRampToValueAtTime(55 * pr, when + 0.04);
     osc.frequency.exponentialRampToValueAtTime(48 * pr, when + 0.25);
-    const g = envAD(ctx, when, opts.gain * 1.1, 0.45);
+    const g = envAD(ctx, when, opts.gain * 1.1, 0.8);
     osc.connect(g).connect(opts.dest);
-    osc.start(when); osc.stop(when + 0.6);
+    osc.start(when); osc.stop(when + 1.0);
     // Click transient: short high-pitched triangle blip
     const click = ctx.createOscillator();
     click.type = 'triangle';
@@ -582,7 +616,7 @@
       // ── Open hat ──
       case 10:  // OH_CLASSIC
       case 18:  // OH_METALLIC
-        playHat(when, opts, 0.25, 6000); return;
+        playHat(when, opts, 0.55, 6000); return;
 
       // ── Cymbal ──
       case 11:  // CY_CLASSIC
@@ -722,13 +756,57 @@
     const sndVol = getSoundVolume(snd);
     const sndPan = getSoundPan(snd);
 
-    // Build a per-hit bus: voice → gain (kit volume × velocity) → panner → master
+    // Build a per-hit bus: voice → gain (kit volume × velocity × track level) → panner → master.
+    // Each bus auto-disconnects after VOICE_MAX_DUR to prevent node accumulation.
+    const VOICE_MAX_DUR = 2.0;
+    const trkLevel = (AR.state.ui.trackLevels[t] || 0) / 100;
+    const chokeGroup = MACHINE_CHOKE[machineId] || 0;
     function makeBus(atWhen) {
       const g = E.ctx.createGain();
-      g.gain.value = sndVol;
+      g.gain.value = sndVol * trkLevel;
       const p = E.ctx.createStereoPanner();
       p.pan.value = sndPan;
       g.connect(p).connect(E.master);
+
+      // Choke: fade out all previously active voices in this choke group.
+      // Tracks are processed in ascending order (0→11), so the right
+      // (higher-numbered) track naturally wins on simultaneous trigs,
+      // matching the AR's priority (CP>RS, HT>MT, OH>CH, CB>CY).
+      if (chokeGroup) {
+        const active = E.chokeActive[chokeGroup] || [];
+        for (let i = active.length - 1; i >= 0; i--) {
+          const prev = active[i];
+          try {
+            prev.cancelScheduledValues(atWhen);
+            prev.setValueAtTime(prev.value, atWhen);
+            prev.exponentialRampToValueAtTime(0.0001, atWhen + 0.006);
+          } catch (e) {}
+        }
+        active.length = 0;
+        active.push(g.gain);
+        E.chokeActive[chokeGroup] = active;
+      }
+
+      // Schedule cleanup: a silent oscillator that fires onended after the
+      // voice has fully decayed, disconnecting the bus from the graph.
+      const cg = E.ctx.createGain();
+      cg.gain.value = 0;
+      const cleanup = E.ctx.createOscillator();
+      cleanup.connect(cg);
+      cg.connect(g);
+      cleanup.start(atWhen);
+      cleanup.stop(atWhen + VOICE_MAX_DUR);
+      cleanup.onended = () => {
+        try { g.disconnect(); p.disconnect(); cg.disconnect(); } catch (e) {}
+        // Remove from choke group tracking
+        if (chokeGroup) {
+          const arr = E.chokeActive[chokeGroup];
+          if (arr) {
+            const idx = arr.indexOf(g.gain);
+            if (idx !== -1) arr.splice(idx, 1);
+          }
+        }
+      };
       return g;
     }
 
@@ -907,6 +985,7 @@
     E.startTime  = E.ctx.currentTime + 0.05;
     E.tickCursor = 0;
     if (!initTrackState(meta)) return;
+    E.chokeActive = {};
 
     E.playing = true;
     const btn = document.getElementById('btn-play');

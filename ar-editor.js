@@ -388,8 +388,13 @@ var setStatus = AR.setStatus;
           muteBtn.title = 'Mute (preview only)';
           muteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (S.ui.mutedTracks.has(t)) S.ui.mutedTracks.delete(t);
-            else                          S.ui.mutedTracks.add(t);
+            if (S.ui.mutedTracks.has(t)) {
+              S.ui.mutedTracks.delete(t);
+              if (S.ui.trackLevels[t] === 0) { S.ui.trackLevels[t] = 100; AR.saveTrackLevels(); }
+            } else {
+              S.ui.mutedTracks.add(t);
+              S.ui.trackLevels[t] = 0; AR.saveTrackLevels();
+            }
             refreshAfterEdit();
           });
 
@@ -405,8 +410,30 @@ var setStatus = AR.setStatus;
             refreshAfterEdit();
           });
 
+          const lvlInp = document.createElement('input');
+          lvlInp.type = 'number';
+          lvlInp.className = 'track-level';
+          lvlInp.min = 0; lvlInp.max = 100;
+          lvlInp.value = S.ui.trackLevels[t];
+          lvlInp.title = 'Track level 0-100 (0 = mute)';
+          lvlInp.addEventListener('click', (e) => e.stopPropagation());
+          lvlInp.addEventListener('keydown', (e) => e.stopPropagation());
+          lvlInp.addEventListener('change', (e) => {
+            e.stopPropagation();
+            let v = parseInt(lvlInp.value, 10);
+            if (isNaN(v)) v = 100;
+            v = Math.max(0, Math.min(100, v));
+            lvlInp.value = v;
+            S.ui.trackLevels[t] = v;
+            if (v === 0) S.ui.mutedTracks.add(t);
+            else          S.ui.mutedTracks.delete(t);
+            AR.saveTrackLevels();
+            refreshAfterEdit();
+          });
+
           ms.appendChild(muteBtn);
           ms.appendChild(soloBtn);
+          ms.appendChild(lvlInp);
           label.appendChild(ms);
         }
 
@@ -498,18 +525,19 @@ var setStatus = AR.setStatus;
       U.gridEl.insertBefore(panel, trackRow);
       S.ui.openPanel = { t, s, el: panel };
 
-      // Highlight the inspected step cell
+      // Highlight the inspected step cell and the whole track row
       const stepEl = trackRow.querySelector(`.step[data-step="${s}"]`);
       if (stepEl) stepEl.classList.add('inspected');
+      trackRow.classList.add('panel-target');
     }
 
     function closeStepPanel() {
       if (!S.ui.openPanel) return;
-      // Remove highlight
       const trackRow = U.gridEl.querySelector(`.track-row[data-track="${S.ui.openPanel.t}"]`);
       if (trackRow) {
         const stepEl = trackRow.querySelector(`.step[data-step="${S.ui.openPanel.s}"]`);
         if (stepEl) stepEl.classList.remove('inspected');
+        trackRow.classList.remove('panel-target');
       }
       S.ui.openPanel.el.remove();
       S.ui.openPanel = null;
@@ -524,10 +552,13 @@ var setStatus = AR.setStatus;
       const panel = buildTrackSettingsPanel(t);
       U.gridEl.insertBefore(panel, trackRow);
       S.ui.openTrackPanel = { t, el: panel };
+      trackRow.classList.add('panel-target');
     }
 
     function closeTrackPanel() {
       if (!S.ui.openTrackPanel) return;
+      const trackRow = U.gridEl.querySelector(`.track-row[data-track="${S.ui.openTrackPanel.t}"]`);
+      if (trackRow) trackRow.classList.remove('panel-target');
       S.ui.openTrackPanel.el.remove();
       S.ui.openTrackPanel = null;
     }

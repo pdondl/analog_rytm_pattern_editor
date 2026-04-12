@@ -27,6 +27,7 @@ AR.state = {
     openTrackPanel: null,  // { t, el } or null
     mutedTracks:    new Set(),  // session-only preview mutes (Set<int>)
     soloedTracks:   new Set(),  // session-only preview solos (Set<int>)
+    trackLevels:    new Array(12).fill(100),  // 0-100 per-track preview level
   },
   requests: {
     pendingSounds: new Set(),  // slot numbers awaiting SysEx response
@@ -64,6 +65,26 @@ AR.isTrackAudible = function(t) {
   if (ui.soloedTracks.size > 0) return ui.soloedTracks.has(t);
   return !ui.mutedTracks.has(t);
 };
+
+// ─── Track level persistence (localStorage) ─────────────────────────────────
+(function () {
+  var LS_KEY = 'plock_trackLevels';
+  try {
+    var saved = JSON.parse(localStorage.getItem(LS_KEY));
+    if (Array.isArray(saved) && saved.length === 12) {
+      AR.state.ui.trackLevels = saved.map(function (v) {
+        return Math.max(0, Math.min(100, Number(v) || 100));
+      });
+      // Restore mutes derived from level=0
+      for (var i = 0; i < 12; i++) {
+        if (AR.state.ui.trackLevels[i] === 0) AR.state.ui.mutedTracks.add(i);
+      }
+    }
+  } catch (e) {}
+  AR.saveTrackLevels = function () {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(AR.state.ui.trackLevels)); } catch (e) {}
+  };
+})();
 
 // ─── UI element references (populated by AR.initUI after DOM ready) ──────────
 AR.ui = {};

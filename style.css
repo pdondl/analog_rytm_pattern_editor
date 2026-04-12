@@ -276,6 +276,22 @@ button:disabled { opacity: 0.35; cursor: default; }
   line-height: 1.2;
 }
 .track-ms-btn:hover { color: #aaa; border-color: #555; }
+.track-level {
+  width: 32px;
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.78em;
+  padding: 0 2px;
+  border-radius: 2px;
+  text-align: center;
+  outline: none;
+  -moz-appearance: textfield;
+}
+.track-level::-webkit-inner-spin-button,
+.track-level::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.track-level:focus { border-color: var(--accent); }
 .track-mute.on {
   color: #ff8070;
   border-color: #6b2520;
@@ -289,6 +305,11 @@ button:disabled { opacity: 0.35; cursor: default; }
 /* Dim a row's steps (but not its label / M/S buttons) when it won't be
    heard in the preview — muted, or another track is soloed. */
 .track-row.track-dim .steps-outer { opacity: 0.35; }
+.track-row.panel-target {
+  outline: 1px solid #2a4a6a;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 .track-settings-panel {
   background: var(--surface);
   border: 1px solid var(--border);

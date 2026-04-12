@@ -63,7 +63,7 @@ function onMidiStateChange() {
     // Not connected — try to silently reconnect to remembered device if it appeared.
     const remembered = lsGetDevice();
     if (remembered && listRytmDevices().includes(remembered)) {
-      connectToNamedDevice(remembered, /*requestOnConnect=*/true);
+      connectToNamedDevice(remembered, /*requestOnConnect=*/false);
     }
   }
   // Refresh picker if it's open
@@ -116,7 +116,7 @@ function renderPicker() {
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         hidePicker();
-        connectToNamedDevice(name, /*requestOnConnect=*/true);
+        connectToNamedDevice(name, /*requestOnConnect=*/false);
       });
       picker.appendChild(item);
     }
@@ -170,7 +170,7 @@ async function onConnectClick() {
   const devices = listRytmDevices();
   // First-ever connect with exactly one device → skip picker
   if (!S.midi.input && devices.length === 1) {
-    connectToNamedDevice(devices[0], /*requestOnConnect=*/true);
+    connectToNamedDevice(devices[0], /*requestOnConnect=*/false);
     return;
   }
   if (U.midiPicker.hidden) showPicker(); else hidePicker();
@@ -191,7 +191,7 @@ async function trySilentReconnect() {
   } catch (e) { return; }
   S.midi.access.onstatechange = onMidiStateChange;
   if (listRytmDevices().includes(remembered)) {
-    connectToNamedDevice(remembered, /*requestOnConnect=*/true);
+    connectToNamedDevice(remembered, /*requestOnConnect=*/false);
   }
 }
 
