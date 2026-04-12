@@ -1283,13 +1283,22 @@ var setStatus = AR.setStatus;
 
       for (let t = 0; t < 12; t++) {
         const base = KIT_TRACKS_BASE + t * AR_SOUND_V5_SZ;
-        kit[base + MACHINE_TYPE_OFFSET] = DEFAULT_TRACK_MACHINES[t];
+        const machIdx = DEFAULT_TRACK_MACHINES[t];
+        kit[base + MACHINE_TYPE_OFFSET] = machIdx;
         for (let i = 0; i < 8; i++) {
           kit[base + 0x1C + i * 2] = DEF_SYNTH[i];
           kit[base + 0x2C + i * 2] = DEF_SAMPLE[i];
           kit[base + 0x3C + i * 2] = DEF_FILT[i];
           kit[base + 0x4C + i * 2] = DEF_AMP[i];
           kit[base + 0x5E + i * 2] = DEF_LFO[i];
+        }
+        // Clamp synth params that are enums to valid range for this machine
+        const mach = MACHINES[machIdx];
+        if (mach?.enums) {
+          for (const [pi, enumArr] of Object.entries(mach.enums)) {
+            const off = base + 0x1C + Number(pi) * 2;
+            if (kit[off] >= enumArr.length) kit[off] = 0;
+          }
         }
       }
 
@@ -1970,8 +1979,7 @@ var setStatus = AR.setStatus;
         let showVal = typeof showInput === 'number' ? displayFn(showInput) : showInput;
         // When not locked, show actual kit default instead of "TRK"
         if (!locked && showVal === 'TRK' && kitDef !== null) {
-          const safe = (showInput >= pMin && showInput < pMax) ? showInput : pMin;
-          showVal = displayFn(safe);
+          showVal = displayFn(Math.max(pMin, Math.min(showInput, pMax - 1)));
         }
 
         body.appendChild(makeParamRow(lbl, showVal, locked, opts));
@@ -2195,11 +2203,8 @@ var setStatus = AR.setStatus;
       if (typeof showInput !== 'number') return showInput;
       const txt = displayFn(showInput);
       // When not locked, show the actual kit default instead of "TRK"
-      // If value exceeds valid range (e.g. enum params in synthetic default kits),
-      // fall back to 0 — the AR's typical default for enum/waveform params.
       if (!locked && txt === 'TRK' && kitDef !== null) {
-        const safe = (showInput >= cfg.pMin && showInput < cfg.pMax) ? showInput : cfg.pMin;
-        return displayFn(safe);
+        return displayFn(Math.max(cfg.pMin, Math.min(showInput, cfg.pMax - 1)));
       }
       return txt;
     }
