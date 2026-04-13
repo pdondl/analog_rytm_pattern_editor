@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>Plock — Analog Rytm Pattern Editor</title>
-  <link rel="stylesheet" href="style.css?v=32">
+  <link rel="stylesheet" href="style.css?v=35">
 </head>
 <body>
 
@@ -125,16 +125,23 @@
   <button id="btn-log" class="log-toggle">Show Log</button>
   <div id="log-panel" class="log-panel" hidden></div>
 
-  <script src="ar-state.js?v=32"></script>
-  <script src="ar-constants.js?v=32"></script>
-  <script src="ar-sysex.js?v=32"></script>
-  <script src="ar-editor.js?v=32"></script>
-  <script src="ar-midi.js?v=32"></script>
-  <script src="ar-audio.js?v=32"></script>
+  <script src="ar-state.js?v=34"></script>
+  <script src="ar-constants.js?v=34"></script>
+  <script src="ar-sysex.js?v=34"></script>
+  <script src="ar-editor.js?v=34"></script>
+  <script src="ar-midi.js?v=34"></script>
+  <script src="ar-audio.js?v=34"></script>
   <script>
     AR.initUI();
     AR.midiInit();
-    if (!AR.state.pattern.raw) AR.newPattern();
+    if (!AR.state.pattern.raw) {
+      if (AR.loadSession()) {
+        AR.setStatus('Session restored', 'ok');
+      } else {
+        AR.newPattern();
+      }
+    }
+    AR.fitToWindow();
   </script>
 </body>
 </html>

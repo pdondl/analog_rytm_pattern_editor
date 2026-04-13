@@ -237,7 +237,7 @@ var setStatus = AR.setStatus;
         + (isLockTrig ? ' · LOCK' : isOn ? ' · TRIG' : '')
         + (modParts.length ? ' [' + modParts.join(', ') + ']' : '')
         + (beyond ? ' · beyond' : '')
-        + '\nclick: trig · alt: lock · shift: mute · ⌘: inspect';
+        + '\nclick: trig · alt: lock · shift: mute · ' + (/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'ctrl') + ': inspect';
 
       return { cell, isOn, isSlide, isLockTrig, beyond };
     }
@@ -1245,6 +1245,19 @@ var setStatus = AR.setStatus;
       if (typeof updateSendBtn === 'function') updateSendBtn();
     };
 
+    // Restore a previously saved session from localStorage.
+    // Returns true if a session was restored, false otherwise.
+    AR.loadSession = function() {
+      var raw = AR.restoreSession();
+      if (!raw) return false;
+      parsePlocks(raw);
+      renderMeta();
+      renderGrid(raw, 0);
+      if (U.btnSaveSyx) U.btnSaveSyx.disabled = false;
+      if (typeof updateSendBtn === 'function') updateSendBtn();
+      return true;
+    };
+
     // Default machine id per track — extracted from AR hardware default kit.
     // Track 12 (FX) has no machine.
     const DEFAULT_TRACK_MACHINES = [
@@ -1371,6 +1384,9 @@ var setStatus = AR.setStatus;
       // then step panel (above track settings).
       if (hadTrack) openTrackSettingsPanel(hadTrack.t);
       if (had) openStepPanel(had.t, had.s);
+      AR.saveSessionDebounced();
+      // After an edit, "New" is no longer a restore action
+      if (U.btnNew) U.btnNew.textContent = 'New';
     }
 
     // Map from PL_SW bit → corresponding PL_EN bit

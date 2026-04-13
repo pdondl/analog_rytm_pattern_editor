@@ -267,6 +267,7 @@ function handleSysex(syx) {
     if (S.pattern.raw) {
       renderGrid(S.pattern.raw, S.ui.stepPage);
     }
+    AR.saveSessionDebounced();
     return;
   }
 
@@ -289,6 +290,7 @@ function handleSysex(syx) {
         S.ui.openPanel.el = U.gridEl.querySelector('.step-panel');
       }
       if (S.requests.savePending) { S.requests.savePending = false; doSaveBundle(); }
+      AR.saveSessionDebounced();
     }
     return;
   }
@@ -352,6 +354,8 @@ function handleSysex(syx) {
     requestAllSoundPool();
   }
 
+  AR.saveSession();
+  if (U.btnNew) U.btnNew.textContent = 'New';
   setStatus('Ready', 'ok');
 }
 
@@ -436,8 +440,17 @@ AR.midiInit = function() {
   U.btnConnect.addEventListener('click', (e) => { e.stopPropagation(); onConnectClick(); });
   U.btnRefresh.addEventListener('click', requestPattern);
   U.btnNew.addEventListener('click', () => {
-    if (S.pattern.raw && !confirm('Discard current pattern and start a new one?')) return;
+    if (U.btnNew.textContent === 'Restore') {
+      if (AR.loadSession()) {
+        setStatus('Pattern restored', 'ok');
+      }
+      U.btnNew.textContent = 'New';
+      return;
+    }
     AR.newPattern();
+    if (AR.hasSavedSession()) {
+      U.btnNew.textContent = 'Restore';
+    }
   });
   U.btnLoadSyx.addEventListener('click', () => U.syxFileIn.click());
 

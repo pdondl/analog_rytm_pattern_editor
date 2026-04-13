@@ -12,6 +12,7 @@
   --group-gap:  8px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html { overflow-x: auto; background: var(--bg); }
 
 body {
   background: var(--bg);
@@ -20,6 +21,7 @@ body {
   font-size: 13px;
   padding: 28px;
   min-height: 100vh;
+  width: fit-content;
 }
 
 h1 {
@@ -194,7 +196,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 .track-settings-panel .ts-suffix { color: var(--muted); font-size: 0.85em; }
 
 /* Grid */
-#grid-wrap { overflow-x: auto; padding-bottom: 8px; }
+#grid-wrap { padding-bottom: 8px; }
 
 .grid {
   display: inline-block;

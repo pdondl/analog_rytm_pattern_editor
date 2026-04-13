@@ -95,6 +95,119 @@ AR.isTrackAudible = function(t) {
   };
 })();
 
+// ─── Session persistence (localStorage) ─────────────────────────────────────
+(function () {
+  var LS_KEY = 'plock_session';
+
+  // Uint8Array → base64 string
+  function u8ToB64(u8) {
+    var bin = '';
+    for (var i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+    return btoa(bin);
+  }
+  // base64 string → Uint8Array
+  function b64ToU8(b64) {
+    var bin = atob(b64);
+    var u8 = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return u8;
+  }
+
+  // Serialize a Map<number, Uint8Array> → Array of [key, base64]
+  function serializeMap(map) {
+    var arr = [];
+    map.forEach(function (v, k) { arr.push([k, u8ToB64(v)]); });
+    return arr;
+  }
+  // Deserialize Array of [key, base64] → Map<number, Uint8Array>
+  function deserializeMap(arr) {
+    var map = new Map();
+    if (!arr) return map;
+    for (var i = 0; i < arr.length; i++) map.set(arr[i][0], b64ToU8(arr[i][1]));
+    return map;
+  }
+
+  AR.saveSession = function () {
+    var P = AR.state.pattern;
+    if (!P.raw) return;
+    try {
+      var data = {
+        raw:          u8ToB64(P.raw),
+        kit:          P.kit    ? u8ToB64(P.kit)    : null,
+        kitSyx:       P.kitSyx ? u8ToB64(P.kitSyx) : null,
+        syxMeta:      P.syxMeta,
+        name:         P.name,
+        soundPool:    serializeMap(P.soundPool),
+        soundPoolSyx: serializeMap(P.soundPoolSyx),
+      };
+      localStorage.setItem(LS_KEY, JSON.stringify(data));
+    } catch (e) {}
+  };
+
+  // Debounced version for use after edits
+  var _saveTimer = null;
+  AR.saveSessionDebounced = function () {
+    if (_saveTimer) clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(function () { _saveTimer = null; AR.saveSession(); }, 500);
+  };
+
+  AR.hasSavedSession = function () {
+    return !!localStorage.getItem(LS_KEY);
+  };
+
+  // Returns the restored pattern state, or null if nothing saved.
+  // Does NOT call renderMeta/renderGrid — caller must do that.
+  AR.restoreSession = function () {
+    try {
+      var json = localStorage.getItem(LS_KEY);
+      if (!json) return null;
+      var data = JSON.parse(json);
+      if (!data || !data.raw) return null;
+
+      var raw  = b64ToU8(data.raw);
+      var kit  = data.kit    ? b64ToU8(data.kit)    : null;
+      var kSyx = data.kitSyx ? b64ToU8(data.kitSyx) : null;
+
+      AR.loadPattern(raw, data.syxMeta, data.name);
+      AR.loadKit(kit, kSyx);
+
+      var P = AR.state.pattern;
+      P.soundPool    = deserializeMap(data.soundPool);
+      P.soundPoolSyx = deserializeMap(data.soundPoolSyx);
+
+      return raw;
+    } catch (e) { return null; }
+  };
+
+  AR.clearSavedSession = function () {
+    localStorage.removeItem(LS_KEY);
+  };
+})();
+
+// ─── Auto-zoom to fit browser window ─────────────────────────────────────────
+(function () {
+  var naturalW = null;
+
+  AR.fitToWindow = function () {
+    // Reset zoom so we can measure the natural content width
+    document.body.style.zoom = '';
+    if (!naturalW) {
+      var grid = document.getElementById('grid');
+      if (!grid) return;
+      // Body is fit-content, so scrollWidth = actual content width
+      naturalW = document.body.scrollWidth;
+    }
+    var V = document.documentElement.clientWidth;
+    var zoom = V / naturalW;
+    // Minimum zoom: 16-step equivalent (~55% of full 32-step width).
+    // Below this, the page scrolls horizontally instead of shrinking further.
+    var minZoom = 0.825;
+    document.body.style.zoom = Math.max(zoom, minZoom);
+  };
+
+  window.addEventListener('resize', AR.fitToWindow);
+})();
+
 // ─── UI element references (populated by AR.initUI after DOM ready) ──────────
 AR.ui = {};
 
