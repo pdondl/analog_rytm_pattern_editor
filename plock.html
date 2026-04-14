@@ -10,7 +10,7 @@
 <body>
 
   <h1>Plock</h1>
-  <div class="subtitle">Analog Rytm Pattern Editor by <a href="http://plentyofnam.es" target="_blank">Plenty of Names in the Club</a><br><a href="https://plentyofnames.bandcamp.com" target="_blank">Bandcamp</a> | <a href="https://soundcloud.com/plentyofnames" target="_blank">SoundCloud</a> | <a href="https://www.instagram.com/plentyofnames" target="_blank">Instagram</a></div>
+  <div class="subtitle">Analog Rytm Pattern Editor by <a href="http://plentyofnam.es" target="_blank">Plenty of Names in the Club</a><br><span id="social-links"><a href="https://plentyofnames.bandcamp.com" target="_blank">Bandcamp</a> | <a href="https://soundcloud.com/plentyofnames" target="_blank">SoundCloud</a> | <a href="https://www.instagram.com/plentyofnames" target="_blank">Instagram</a></span></div>
 
   <div id="browser-warn" class="browser-warn" hidden></div>
 
@@ -132,6 +132,10 @@
   <script src="ar-midi.js?v=34"></script>
   <script src="ar-audio.js?v=34"></script>
   <script>
+    if (window.self !== window.top && /plentyofnames\.github\.io|plentyofnam\.es/.test(document.referrer)) {
+      var sl = document.getElementById('social-links');
+      if (sl) sl.hidden = true;
+    }
     AR.initUI();
     AR.midiInit();
     if (!AR.state.pattern.raw) {
