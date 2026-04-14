@@ -748,6 +748,16 @@ button:disabled { opacity: 0.35; cursor: default; }
   opacity: 0.55;
   letter-spacing: 0.5px;
 }
+.disclaimer {
+  margin-top: 18px;
+  max-width: 720px;
+  font-size: 0.75em;
+  opacity: 0.55;
+  line-height: 1.5;
+}
+.disclaimer b {
+  opacity: 0.85;
+}
 
 /* ─── Log panel ──────────────────────────────────────────────────────────── */
 .log-toggle {

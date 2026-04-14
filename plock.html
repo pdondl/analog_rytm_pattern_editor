@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>Plock — Analog Rytm Pattern Editor</title>
-  <link rel="stylesheet" href="style.css?v=36">
+  <link rel="stylesheet" href="style.css?v=37">
 </head>
 <body>
 
@@ -120,17 +120,23 @@
     </div>
   </div>
 
+  <div class="disclaimer">
+    <b>v0.9.0-beta</b> &middot; Provided as-is, no warranty. This tool sends SysEx to your Analog Rytm and can overwrite patterns, kits, sounds, and global/settings data.
+    Malformed SysEx could in principle trigger firmware bugs, crashes, or data loss.
+    A full <b>EMPTY RESET</b> (hold <code>FUNC</code> while powering on) restores the AR to factory state, and firmware can be reflashed via Elektron Transfer &mdash; so a true brick is extremely unlikely, but not something anyone can guarantee.
+    <b>Back up your projects</b> (Elektron Transfer &rarr; full backup) before using this. You are responsible for your own data.
+  </div>
   <div class="credit">Built by a human and a Claude.</div>
 
   <button id="btn-log" class="log-toggle">Show Log</button>
   <div id="log-panel" class="log-panel" hidden></div>
 
-  <script src="ar-state.js?v=34"></script>
-  <script src="ar-constants.js?v=34"></script>
-  <script src="ar-sysex.js?v=34"></script>
-  <script src="ar-editor.js?v=34"></script>
-  <script src="ar-midi.js?v=34"></script>
-  <script src="ar-audio.js?v=34"></script>
+  <script src="ar-state.js?v=35"></script>
+  <script src="ar-constants.js?v=35"></script>
+  <script src="ar-sysex.js?v=35"></script>
+  <script src="ar-editor.js?v=35"></script>
+  <script src="ar-midi.js?v=35"></script>
+  <script src="ar-audio.js?v=35"></script>
   <script>
     if (window.self !== window.top && /plentyofnames\.github\.io|plentyofnam\.es/.test(document.referrer)) {
       var sl = document.getElementById('social-links');
