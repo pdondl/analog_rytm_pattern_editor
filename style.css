@@ -173,7 +173,7 @@ button:disabled { opacity: 0.35; cursor: default; }
 #pattern-meta .meta-arrow:hover { color: var(--accent); }
 #pattern-meta .meta-line { display: block; }
 #pattern-meta .meta-line > span { display: inline-block; min-width: 130px; }
-#pattern-meta .meta-line > span:first-child { min-width: 185px; }
+#pattern-meta .meta-line > span:first-child { min-width: 250px; }
 #pattern-meta .meta-suffix { color: var(--muted); }
 #pattern-meta .meta-val { display: inline-block; min-width: 32px; text-align: right; margin-right: 3px; }
 #pattern-meta .meta-slider {
